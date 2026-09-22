@@ -155,25 +155,26 @@ st.markdown(f"""
     div.stButton {{ margin: 0; }}
 
     /* Buy / Sell action buttons — bigger, colored, easy to hit */
-    .st-key-buy_btn button, [class*="st-key-wl_buy_"] button {{
+    .st-key-buy_btn button, [class*="st-key-wl_buy_"] button, [class*="st-key-pos_buy_"] button {{
         background: {GREEN} !important; color: #FFFFFF !important; border: 1px solid {GREEN} !important;
         font-weight: 700 !important; font-size: 15px !important; min-height: 2.6rem !important;
         border-radius: 8px !important; width: 100% !important; text-align: center !important;
     }}
-    .st-key-sell_btn button, [class*="st-key-wl_sell_"] button {{
+    .st-key-sell_btn button, [class*="st-key-wl_sell_"] button, [class*="st-key-pos_sell_"] button {{
         background: {RED} !important; color: #FFFFFF !important; border: 1px solid {RED} !important;
         font-weight: 700 !important; font-size: 15px !important; min-height: 2.6rem !important;
         border-radius: 8px !important; width: 100% !important; text-align: center !important;
     }}
-    [class*="st-key-wl_buytrig_"] button, [class*="st-key-wl_selltrig_"] button {{
+    [class*="st-key-wl_buytrig_"] button, [class*="st-key-wl_selltrig_"] button,
+    [class*="st-key-pos_buytrig_"] button, [class*="st-key-pos_selltrig_"] button {{
         min-height: 34px !important; height: 34px !important; width: 34px !important;
         padding: 0 !important; border-radius: 50% !important; font-size: 13px !important;
         margin-top: 6px;
     }}
-    [class*="st-key-wl_buytrig_"] button {{
+    [class*="st-key-wl_buytrig_"] button, [class*="st-key-pos_buytrig_"] button {{
         background: {GREEN} !important; color: #FFFFFF !important; border: 1px solid {GREEN} !important;
     }}
-    [class*="st-key-wl_selltrig_"] button {{
+    [class*="st-key-wl_selltrig_"] button, [class*="st-key-pos_selltrig_"] button {{
         background: {RED} !important; color: #FFFFFF !important; border: 1px solid {RED} !important;
     }}
     [class*="st-key-wl_remove_"] button {{
@@ -1146,9 +1147,9 @@ def render_paper_trading_tab():
             technicals = fetch_technicals(tuple(open_symbols))
 
             st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
-            pos_cols = [1.6, 0.8, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
+            pos_cols = [1.4, 0.7, 0.85, 0.85, 0.85, 0.85, 0.85, 0.85, 0.5, 0.5]
             pcols = st.columns(pos_cols)
-            for h, label in zip(pcols, ["STOCK", "QTY", "BUY PRICE", "CMP", "P&L %", "BELOW EMA20", "BELOW EMA50", "DEAD CROSS"]):
+            for h, label in zip(pcols, ["STOCK", "QTY", "BUY PRICE", "CMP", "P&L %", "BELOW EMA20", "BELOW EMA50", "DEAD CROSS", "", ""]):
                 h.markdown(f"<span style='font-size:12px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
 
             for sym in open_symbols:
@@ -1174,6 +1175,35 @@ def render_paper_trading_tab():
                 pc[5].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{below20_str}</div>", unsafe_allow_html=True)
                 pc[6].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{below50_str}</div>", unsafe_allow_html=True)
                 pc[7].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{dead_cross_str}</div>", unsafe_allow_html=True)
+
+                with pc[8]:
+                    with st.container(key=f"pos_buytrig_{active_portfolio}_{sym}"):
+                        with st.popover("B", use_container_width=True):
+                            st.markdown(f"<div style='font-weight:600;margin-bottom:6px'>Buy {sym}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div class='num' style='font-size:13px;color:{MUTED};margin-bottom:8px'>Live CMP: ₹{cmp:.2f}</div>", unsafe_allow_html=True)
+                            pos_buy_qty = st.number_input("Qty", min_value=1, value=1, step=1, key=f"pos_buyqty_{active_portfolio}_{sym}")
+                            pos_buy_click = st.button("🟢 Confirm Buy", key=f"pos_buy_{active_portfolio}_{sym}", use_container_width=True)
+                with pc[9]:
+                    with st.container(key=f"pos_selltrig_{active_portfolio}_{sym}"):
+                        with st.popover("S", use_container_width=True):
+                            st.markdown(f"<div style='font-weight:600;margin-bottom:6px'>Sell {sym}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div class='num' style='font-size:13px;color:{MUTED};margin-bottom:8px'>Live CMP: ₹{cmp:.2f} · Held: {pos['qty']}</div>", unsafe_allow_html=True)
+                            pos_sell_qty = st.number_input("Qty", min_value=1, max_value=max(pos['qty'], 1), value=1, step=1, key=f"pos_sellqty_{active_portfolio}_{sym}")
+                            pos_sell_click = st.button("🔴 Confirm Sell", key=f"pos_sell_{active_portfolio}_{sym}", use_container_width=True)
+
+                if pos_buy_click:
+                    if cmp is None:
+                        st.error(f"No live price for {sym} — can't trade.")
+                    elif pos_buy_qty * cmp > cash:
+                        st.error(f"Not enough paper cash (₹{cash:,.0f}) to buy {pos_buy_qty} {sym} @ ₹{cmp:.2f}.")
+                    else:
+                        save_paper_trade(active_portfolio, sym, "BUY", pos_buy_qty, cmp)
+                        st.success(f"Bought {pos_buy_qty} {sym} @ ₹{cmp:.2f} in {active_portfolio}")
+                        st.rerun()
+                if pos_sell_click:
+                    save_paper_trade(active_portfolio, sym, "SELL", pos_sell_qty, cmp)
+                    st.success(f"Sold {pos_sell_qty} {sym} @ ₹{cmp:.2f} in {active_portfolio}")
+                    st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
         # -- Trade history --------------------------------------------------
