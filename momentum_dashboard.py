@@ -47,10 +47,10 @@ DEFAULT_STARTING_CASH = 100000.0
 # ---------------------------------------------------------------------------
 st.markdown(f"""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
-    .stApp {{ background: {BG}; font-family: 'Public Sans', sans-serif; }}
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+    .stApp {{ background: {BG}; font-family: 'Inter', sans-serif; }}
     .block-container {{ padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1400px; }}
-    h1, h2, h3, h4 {{ font-family: 'Source Serif 4', serif; color: {INK}; letter-spacing: -0.01em; }}
+    h1, h2, h3, h4 {{ font-family: 'Inter', sans-serif; color: {INK}; letter-spacing: -0.01em; font-weight: 700; }}
     h1 {{ font-size: 2.1rem !important; }}
     h2 {{ font-size: 1.5rem !important; }}
     h3 {{ font-size: 1.2rem !important; }}
@@ -115,10 +115,12 @@ st.markdown(f"""
         font-size: 12.5px !important; font-weight: 600 !important;
         border: 1px solid {BORDER} !important; background: {CARD} !important;
         width: auto !important; min-height: 0 !important; color: {INK} !important;
+        white-space: nowrap !important; overflow: visible !important;
     }}
     .st-key-sort_pills div.stButton > button:hover,
     .st-key-pv_timeframe div.stButton > button:hover {{ background: {CARD_ALT} !important; }}
-    .st-key-sort_pills div[data-testid="stHorizontalBlock"] {{ gap: 6px !important; }}
+    .st-key-sort_pills div[data-testid="stHorizontalBlock"] {{ gap: 6px !important; align-items: center !important; }}
+    .st-key-sort_pills [data-testid="column"] {{ width: fit-content !important; flex: none !important; min-width: fit-content !important; }}
 
     .card {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px; padding: 20px 22px; margin-bottom: 6px; }}
     .card-alt {{ background: {CARD_ALT}; border: 1px solid {BORDER}; border-radius: 10px; padding: 20px 22px; margin-bottom: 6px; }}
@@ -572,7 +574,7 @@ def render_holdings_tab():
         st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
 
         with st.container(key="sort_pills"):
-            sp_cols = st.columns([0.35, 0.32, 0.32, 0.34, 0.44, 6])
+            sp_cols = st.columns([0.5, 0.85, 0.95, 0.95, 1.3, 4])
             sp_cols[0].markdown(f"<span style='font-size:12px;font-weight:600;color:{MUTED};text-transform:uppercase;padding-top:4px;display:block'>Sort</span>", unsafe_allow_html=True)
             for i, (label, col) in enumerate(SORT_OPTIONS):
                 active = st.session_state.sort_key == col
@@ -652,7 +654,7 @@ def render_holdings_tab():
           <div style="font-size:13px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:{MUTED};margin-bottom:4px">
             Selected holding · Rank {row['Rank']} of {len(df_sorted)}
           </div>
-          <div style="font-family:'Source Serif 4',serif;font-size:24px;font-weight:600;color:{INK};margin-bottom:14px">{row['Symbol']}</div>
+          <div style="font-family:'Inter',sans-serif;font-size:24px;font-weight:700;color:{INK};margin-bottom:14px">{row['Symbol']}</div>
           <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:14px">
             <span class="num" style="font-size:26px;font-weight:600">₹{row['CMP']:.2f}</span>
             <span class="num" style="font-size:14px;font-weight:600;color:{day_color}">{day_str} today</span>
@@ -772,30 +774,33 @@ def render_watchlist_tab():
         watchlists = {"My Watchlist": {"stocks": [], "linked_portfolio": None}}
         save_watchlists(watchlists)
 
-    if "active_watchlist" not in st.session_state or st.session_state.active_watchlist not in watchlists:
-        st.session_state.active_watchlist = list(watchlists.keys())[0]
+    names = list(watchlists.keys())
 
-    # -- Watchlist selector / create / delete ---------------------------
-    st.markdown('<div class="card-upload">', unsafe_allow_html=True)
-    sel1, sel2, sel3 = st.columns([2, 2, 1])
-    active_name = sel1.selectbox("Active watchlist", list(watchlists.keys()),
-                                  index=list(watchlists.keys()).index(st.session_state.active_watchlist),
-                                  key="wl_selector")
-    st.session_state.active_watchlist = active_name
+    # -- Create a new watchlist (compact row above the tabs) -------------
+    with st.container(key="wl_create_row"):
+        cr1, cr2 = st.columns([4, 1])
+        new_name = cr1.text_input("Create new watchlist", key="wl_new_name", placeholder="e.g. Sigma Top 10", label_visibility="collapsed")
+        if cr2.button("➕ New watchlist", use_container_width=True) and new_name.strip():
+            if new_name.strip() not in watchlists:
+                watchlists[new_name.strip()] = {"stocks": [], "linked_portfolio": None}
+                save_watchlists(watchlists)
+                st.rerun()
+            else:
+                st.warning("A watchlist with that name already exists.")
 
-    new_name = sel2.text_input("Create new watchlist", key="wl_new_name", placeholder="e.g. Sigma Top 10")
-    if sel3.button("➕ Create", use_container_width=True) and new_name.strip():
-        if new_name.strip() not in watchlists:
-            watchlists[new_name.strip()] = {"stocks": [], "linked_portfolio": None}
-            save_watchlists(watchlists)
-            st.session_state.active_watchlist = new_name.strip()
-            st.rerun()
-        else:
-            st.warning("A watchlist with that name already exists.")
+    # -- Browse between watchlists via tabs at the top --------------------
+    tabs = st.tabs(names)
+    for tab, active_name in zip(tabs, names):
+        with tab:
+            _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, holding_symbols)
 
+
+def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, holding_symbols):
     active_wl = watchlists[active_name]
 
-    link1, link2 = st.columns([2, 2])
+    # -- Link to portfolio / delete ---------------------------------------
+    st.markdown('<div class="card-upload">', unsafe_allow_html=True)
+    link1, link2 = st.columns([3, 1])
     current_link = active_wl.get("linked_portfolio")
     link_options = ["— none —"] + portfolio_names
     link_idx = link_options.index(current_link) if current_link in portfolio_names else 0
@@ -809,14 +814,10 @@ def render_watchlist_tab():
         save_watchlists(watchlists)
         st.rerun()
 
-    if link2.button(f"🗑️ Delete \"{active_name}\"", use_container_width=True):
+    if len(watchlists) > 1 and link2.button(f"🗑️ Delete", key=f"wl_delete_{active_name}", use_container_width=True):
         del watchlists[active_name]
-        if not watchlists:
-            watchlists = {"My Watchlist": {"stocks": [], "linked_portfolio": None}}
         save_watchlists(watchlists)
-        st.session_state.active_watchlist = list(watchlists.keys())[0]
         st.rerun()
-
     st.markdown('</div>', unsafe_allow_html=True)
 
     # -- Add stocks: upload or manual ------------------------------------
@@ -843,7 +844,6 @@ def render_watchlist_tab():
                 st.error(f"Couldn't read that file: {e}")
 
             if src_df is not None:
-                st.dataframe(src_df.head(10), use_container_width=True, hide_index=True)
                 cols = src_df.columns.tolist()
                 guess_symbol = next((c for c in cols if "symbol" in c.lower() or "stock" in c.lower()), cols[0])
                 guess_score = next((c for c in cols if "rank" in c.lower() or "perform" in c.lower() or "return" in c.lower() or "score" in c.lower()), cols[-1])
@@ -883,7 +883,7 @@ def render_watchlist_tab():
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # -- Cards for the active watchlist -----------------------------------
+    # -- Table for this watchlist's stocks --------------------------------
     stocks = active_wl.get("stocks", [])
     if not stocks:
         st.caption(f"\"{active_name}\" is empty — upload a Sigma export or add a symbol manually above.")
@@ -945,30 +945,30 @@ def render_watchlist_tab():
         with rc8:
             remove_click = st.button("✕", key=f"wl_remove_{active_name}_{sym}", use_container_width=True, help=f"Remove {sym} from this watchlist")
 
-        if True:
-            if buy_click:
-                if cmp is None:
-                    st.error(f"No live price for {sym} — can't trade.")
-                elif cmp > cash:
-                    st.error(f"Not enough paper cash (₹{cash:,.0f}) to buy {sym} @ ₹{cmp:.2f}.")
-                else:
-                    save_paper_trade(trade_portfolio, sym, "BUY", 1, cmp)
-                    st.success(f"Paper-bought 1 {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
-                    st.rerun()
-            if sell_click:
-                if cmp is None:
-                    st.error(f"No live price for {sym} — can't trade.")
-                else:
-                    save_paper_trade(trade_portfolio, sym, "SELL", 1, cmp)
-                    st.success(f"Paper-sold 1 {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
-                    st.rerun()
-            if remove_click:
-                active_wl["stocks"] = [s for s in stocks if s["Symbol"] != sym]
-                watchlists[active_name] = active_wl
-                save_watchlists(watchlists)
+        if buy_click:
+            if cmp is None:
+                st.error(f"No live price for {sym} — can't trade.")
+            elif cmp > cash:
+                st.error(f"Not enough paper cash (₹{cash:,.0f}) to buy {sym} @ ₹{cmp:.2f}.")
+            else:
+                save_paper_trade(trade_portfolio, sym, "BUY", 1, cmp)
+                st.success(f"Paper-bought 1 {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
                 st.rerun()
+        if sell_click:
+            if cmp is None:
+                st.error(f"No live price for {sym} — can't trade.")
+            else:
+                save_paper_trade(trade_portfolio, sym, "SELL", 1, cmp)
+                st.success(f"Paper-sold 1 {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
+                st.rerun()
+        if remove_click:
+            active_wl["stocks"] = [s for s in stocks if s["Symbol"] != sym]
+            watchlists[active_name] = active_wl
+            save_watchlists(watchlists)
+            st.rerun()
 
     st.markdown('</div>', unsafe_allow_html=True)
+
 
 
 # =============================================================================
