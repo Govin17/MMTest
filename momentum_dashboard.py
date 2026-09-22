@@ -149,74 +149,57 @@ k5.metric("Below EMA50", f"{n_below50} stocks", delta=None, delta_color="off")
 st.write("")
 
 # ---------------------------------------------------------------------------
-# Holdings — one-line table rows, click a row to expand a detail line
+# Holdings — clean overview table, pick a stock below for full detail
 # ---------------------------------------------------------------------------
 st.subheader("Holdings")
 
-st.markdown("""
-<style>
-    div[data-testid="stExpander"] {
-        background: transparent;
-        border: none;
-        border-bottom: 1px solid #2d2f39;
-        border-radius: 0;
-        margin-bottom: 0;
-    }
-    div[data-testid="stExpander"] summary {
-        padding: 8px 4px !important;
-    }
-    div[data-testid="stExpander"] summary p {
-        font-size: 0.92rem !important;
-        font-family: monospace;
-    }
-    .holdings-header {
-        display: flex; font-size: 0.78rem; opacity: 0.6;
-        padding: 4px 4px; border-bottom: 1px solid #2d2f39;
-        font-family: monospace;
-    }
-</style>
-""", unsafe_allow_html=True)
+df_sorted = df.sort_values("P&L %", ascending=False, na_position="last").reset_index(drop=True)
 
-st.markdown(
-    '<div class="holdings-header">'
-    '<span style="width:14%">STOCK</span>'
-    '<span style="width:16%">CMP</span>'
-    '<span style="width:30%">P&amp;L</span>'
-    '<span style="width:16%">TREND</span>'
-    '</div>',
-    unsafe_allow_html=True,
+overview = pd.DataFrame({
+    "Stock": df_sorted["Symbol"],
+    "CMP": df_sorted["CMP"],
+    "P&L %": df_sorted["P&L %"],
+    "Trend": df_sorted["EMA Cross Bearish"].map(
+        lambda b: "🔴 Bearish" if b is True else ("🟢 Bullish" if b is False else "⚪ N/A")
+    ),
+})
+
+
+def highlight_pnl(val):
+    if pd.isna(val):
+        return ""
+    return "color:#4ade80; font-weight:600" if val >= 0 else "color:#ff6b6b; font-weight:600"
+
+
+styled_overview = overview.style.format({"CMP": "₹{:.2f}", "P&L %": "{:+.2f}%"}).map(
+    highlight_pnl, subset=["P&L %"]
 )
 
-df_sorted = df.sort_values("P&L %", ascending=False, na_position="last")
+st.dataframe(styled_overview, use_container_width=True, hide_index=True, height=38 * len(overview) + 38)
 
-for _, row in df_sorted.iterrows():
-    pnl_pct = row["P&L %"]
-    pnl_rs = row["P&L ₹"]
-    trend_bullish = not row["EMA Cross Bearish"] if pd.notna(row["EMA Cross Bearish"]) else None
+st.caption("Select a stock to see full details:")
+pick = st.selectbox("Stock detail", df_sorted["Symbol"].tolist(), label_visibility="collapsed")
+row = df_sorted[df_sorted["Symbol"] == pick].iloc[0]
 
-    pnl_str = f"{pnl_pct:+.2f}% (₹{pnl_rs:+,.0f})" if pd.notna(pnl_pct) else "—"
-    trend_str = "🟢 Bullish" if trend_bullish else ("🔴 Bearish" if trend_bullish is False else "⚪ N/A")
-    cmp_str = f"₹{row['CMP']:.2f}" if pd.notna(row["CMP"]) else "—"
+value_str = f"₹{row['Value']:,.0f}" if pd.notna(row["Value"]) else "—"
+day_str = f"{row['Day %']:+.2f}%" if pd.notna(row["Day %"]) else "—"
+ema_str = f"₹{row['EMA20']:.2f} / ₹{row['EMA50']:.2f}" if pd.notna(row["EMA20"]) else "—"
+trend_bullish = not row["EMA Cross Bearish"] if pd.notna(row["EMA Cross Bearish"]) else None
+trend_str = "🟢 Bullish" if trend_bullish else ("🔴 Bearish" if trend_bullish is False else "⚪ N/A")
 
-    header = f"{row['Symbol']:<12}{cmp_str:<14}{pnl_str:<28}{trend_str}"
-
-    value_str = f"₹{row['Value']:,.0f}" if pd.notna(row["Value"]) else "—"
-    day_str = f"{row['Day %']:+.2f}%" if pd.notna(row["Day %"]) else "—"
-    ema_str = f"₹{row['EMA20']:.2f} / ₹{row['EMA50']:.2f}" if pd.notna(row["EMA20"]) else "—"
-
-    with st.expander(header):
-        st.markdown(
-            f"Shares: **{row['Shares']}**  ·  Avg Price: **₹{row['Avg Price']:.2f}**  ·  "
-            f"Invested: **₹{row['Invested']:,.0f}**  ·  "
-            f"Current Value: **{value_str}**  ·  "
-            f"Day Change: **{day_str}**"
-        )
-        st.markdown(
-            f"EMA20/EMA50: **{ema_str}**  ·  "
-            f"Below EMA20: {'🔴 Yes' if row['Below EMA20'] else '🟢 No'}  ·  "
-            f"Below EMA50: {'🔴 Yes' if row['Below EMA50'] else '🟢 No'}  ·  "
-            f"EMA trend: {trend_str}"
-        )
+with st.container(border=True):
+    d1, d2, d3 = st.columns(3)
+    d1.metric("Shares", f"{row['Shares']}")
+    d1.metric("Avg Price", f"₹{row['Avg Price']:.2f}")
+    d2.metric("Invested", f"₹{row['Invested']:,.0f}")
+    d2.metric("Current Value", value_str)
+    d3.metric("Day Change", day_str)
+    d3.metric("EMA20 / EMA50", ema_str)
+    st.caption(
+        f"Below EMA20: {'🔴 Yes' if row['Below EMA20'] else '🟢 No'}   •   "
+        f"Below EMA50: {'🔴 Yes' if row['Below EMA50'] else '🟢 No'}   •   "
+        f"Trend: {trend_str}"
+    )
 
 st.write("")
 
