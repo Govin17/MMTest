@@ -186,12 +186,12 @@ st.markdown(f"""
 
     /* Card-styled containers (st.container(key=...)) — avoids the empty-bar
        bug that literal <div>...</div> markdown pairs cause around widgets */
-    .st-key-pp_selector, .st-key-pp_create, .st-key-pp_trade_ticket,
-    .st-key-wl_create_row {{
+    .st-key-pp_selector, .st-key-pp_create, [class*="st-key-pp_trade_ticket_"],
+    [class*="st-key-pp_delete_"], .st-key-wl_create_row, .st-key-pp_create_row {{
         background: {CARD_UPLOAD}; border: 1px solid {BORDER}; border-radius: 10px;
         padding: 18px 20px; margin-bottom: 10px;
     }}
-    .st-key-pp_metrics {{
+    .st-key-pp_metrics, [class*="st-key-pp_metrics_"] {{
         background: {CARD_ALT}; border: 1px solid {BORDER}; border-radius: 10px;
         padding: 18px 20px; margin-bottom: 6px;
     }}
@@ -1028,43 +1028,45 @@ def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, 
 # =============================================================================
 def render_paper_trading_tab():
     portfolios = load_portfolios()
-    portfolio_names = list(portfolios.keys())
+    names = list(portfolios.keys())
 
-    if "active_portfolio" not in st.session_state or st.session_state.active_portfolio not in portfolio_names:
-        st.session_state.active_portfolio = portfolio_names[0]
+    # -- Create a new portfolio (compact row above the tabs) --------------
+    with st.container(key="pp_create_row"):
+        cr1, cr2, cr3 = st.columns([3, 1.3, 1])
+        new_port_name = cr1.text_input("New portfolio name", key="new_port_name", placeholder="e.g. Aggressive Momentum", label_visibility="collapsed")
+        new_port_cash = cr2.number_input("Starting cash", min_value=1000.0, value=100000.0, step=5000.0, key="new_port_cash")
+        if cr3.button("➕ New portfolio", use_container_width=True) and new_port_name.strip():
+            if new_port_name.strip() not in portfolios:
+                portfolios[new_port_name.strip()] = {"starting_cash": new_port_cash}
+                save_portfolios(portfolios)
+                st.session_state.active_portfolio = new_port_name.strip()
+                st.rerun()
+            else:
+                st.warning("A portfolio with that name already exists.")
+
+    # -- Browse between portfolios via tabs at the top ---------------------
+    tabs = st.tabs(names)
+    for tab, name in zip(tabs, names):
+        with tab:
+            _render_one_portfolio(name, portfolios, names)
+
+
+def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
+    st.session_state.active_portfolio = active_portfolio
 
     col_main, col_tools = st.columns([2.6, 1], gap="medium")
 
     # ======================================================================
-    # RIGHT: portfolio selector / create / delete + trade ticket
+    # RIGHT: delete + trade ticket
     # ======================================================================
     with col_tools:
-        with st.container(key="pp_selector"):
-            active_portfolio = st.selectbox(
-                "Active portfolio", portfolio_names,
-                index=portfolio_names.index(st.session_state.active_portfolio),
-                key="portfolio_selector",
-            )
-            st.session_state.active_portfolio = active_portfolio
-
-            if len(portfolio_names) > 1 and st.button(f"🗑️ Delete \"{active_portfolio}\"", key="del_portfolio", use_container_width=True):
-                del portfolios[active_portfolio]
-                save_portfolios(portfolios)
-                st.session_state.active_portfolio = list(portfolios.keys())[0]
-                st.rerun()
-
-        with st.container(key="pp_create"):
-            st.markdown(f"<div style='font-size:13px;font-weight:600;color:{MUTED};margin-bottom:4px'>Create new portfolio</div>", unsafe_allow_html=True)
-            new_port_name = st.text_input("New portfolio name", key="new_port_name", placeholder="e.g. Aggressive Momentum", label_visibility="collapsed")
-            new_port_cash = st.number_input("Starting cash", min_value=1000.0, value=100000.0, step=5000.0, key="new_port_cash")
-            if st.button("➕ Create portfolio", use_container_width=True) and new_port_name.strip():
-                if new_port_name.strip() not in portfolios:
-                    portfolios[new_port_name.strip()] = {"starting_cash": new_port_cash}
+        if len(portfolio_names) > 1:
+            with st.container(key=f"pp_delete_{active_portfolio}"):
+                if st.button(f"🗑️ Delete \"{active_portfolio}\"", key=f"del_portfolio_{active_portfolio}", use_container_width=True):
+                    del portfolios[active_portfolio]
                     save_portfolios(portfolios)
-                    st.session_state.active_portfolio = new_port_name.strip()
+                    st.session_state.active_portfolio = list(portfolios.keys())[0]
                     st.rerun()
-                else:
-                    st.warning("A portfolio with that name already exists.")
 
     starting_cash = portfolios[active_portfolio]["starting_cash"]
     trades = load_paper_trades()
@@ -1084,7 +1086,7 @@ def render_paper_trading_tab():
     returns_pct = (holdings_value - invested_value) / invested_value * 100 if invested_value else 0
 
     with col_tools:
-        with st.container(key="pp_trade_ticket"):
+        with st.container(key=f"pp_trade_ticket_{active_portfolio}"):
             watchlists = load_watchlists()
             universe = sorted(set(df["Symbol"].tolist()) | set(open_symbols))
             for wl in watchlists.values():
@@ -1092,11 +1094,11 @@ def render_paper_trading_tab():
 
             st.markdown(f"<div style='font-size:14px;font-weight:600;margin-bottom:10px'>Place a trade — {active_portfolio}</div>", unsafe_allow_html=True)
 
-            symbol_choice = st.selectbox("Symbol", universe if universe else ["—"], key="paper_symbol")
-            manual_symbol = st.text_input("Or type a symbol not listed", key="paper_symbol_manual", placeholder="e.g. TCS")
+            symbol_choice = st.selectbox("Symbol", universe if universe else ["—"], key=f"paper_symbol_{active_portfolio}")
+            manual_symbol = st.text_input("Or type a symbol not listed", key=f"paper_symbol_manual_{active_portfolio}", placeholder="e.g. TCS")
             trade_symbol = manual_symbol.strip().upper() if manual_symbol.strip() else symbol_choice
 
-            qty = st.number_input("Qty", min_value=1, value=1, step=1, key="paper_qty")
+            qty = st.number_input("Qty", min_value=1, value=1, step=1, key=f"paper_qty_{active_portfolio}")
 
             live_price = fetch_watchlist_prices((trade_symbol,)).get(trade_symbol) if trade_symbol and trade_symbol != "—" else None
             st.markdown(
@@ -1106,8 +1108,8 @@ def render_paper_trading_tab():
             )
 
             bcol, scol = st.columns(2)
-            buy_clicked = bcol.button("🟢 Buy", use_container_width=True, key="buy_btn")
-            sell_clicked = scol.button("🔴 Sell", use_container_width=True, key="sell_btn")
+            buy_clicked = bcol.button("🟢 Buy", use_container_width=True, key=f"buy_btn_{active_portfolio}")
+            sell_clicked = scol.button("🔴 Sell", use_container_width=True, key=f"sell_btn_{active_portfolio}")
 
             if (buy_clicked or sell_clicked) and trade_symbol and trade_symbol != "—":
                 if live_price is None:
@@ -1125,7 +1127,7 @@ def render_paper_trading_tab():
     # LEFT: metrics, open positions, trade history — always visible
     # ======================================================================
     with col_main:
-        with st.container(key="pp_metrics"):
+        with st.container(key=f"pp_metrics_{active_portfolio}"):
             st.caption(f"\"{active_portfolio}\" — practice with virtual money, trades execute at the live CMP, no real capital involved.")
 
             k1, k2, k3, k4 = st.columns(4)
@@ -1216,7 +1218,7 @@ def render_paper_trading_tab():
                 hist["Timestamp"] = hist["Timestamp"].dt.strftime("%d %b %Y, %H:%M")
                 st.dataframe(hist.drop(columns=["Portfolio"]), use_container_width=True, hide_index=True)
 
-                if st.button(f"🗑️ Reset \"{active_portfolio}\" (clear its trades)"):
+                if st.button(f"🗑️ Reset \"{active_portfolio}\" (clear its trades)", key=f"reset_{active_portfolio}"):
                     trades = trades[trades["Portfolio"] != active_portfolio]
                     trades.to_csv(PAPER_TRADES_FILE, index=False)
                     st.rerun()
