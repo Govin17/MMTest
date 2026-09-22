@@ -98,14 +98,14 @@ HOLDINGS = [
 @st.cache_data(ttl=60)
 def fetch_prices(holdings):
     rows = []
-    price_series = {}   # ticker -> Series of Close, indexed by date (last ~30 sessions)
+    price_series = {}   # ticker -> Series of Close, indexed by date (up to 1y)
     for ticker, shares, avg_price in holdings:
         cmp, prev_close, ema20, ema50 = None, None, None, None
         volume, avg_volume, vol_ratio = None, None, None
         spark = []
         try:
             t = yf.Ticker(ticker)
-            hist = t.history(period="2mo")
+            hist = t.history(period="1y")
             if not hist.empty:
                 cmp = round(float(hist["Close"].iloc[-1]), 2)
                 prev_close = round(float(hist["Close"].iloc[-2]), 2) if len(hist) > 1 else cmp
@@ -114,7 +114,7 @@ def fetch_prices(holdings):
                 if avg_volume:
                     vol_ratio = round(volume / avg_volume, 2)
                 spark = hist["Close"].tail(15).tolist()
-                price_series[ticker] = hist["Close"].tail(30)
+                price_series[ticker] = hist["Close"]
 
             hist_long = t.history(period="4mo")
             if len(hist_long) >= 50:
@@ -185,16 +185,62 @@ with c2:
 df, portfolio_value_series = fetch_prices(HOLDINGS)
 
 # ---------------------------------------------------------------------------
-# Portfolio value history
+# Portfolio value history — with timeframe filter
 # ---------------------------------------------------------------------------
 if portfolio_value_series is not None and len(portfolio_value_series) > 1:
-    pv_start = portfolio_value_series.iloc[0]
-    pv_end = portfolio_value_series.iloc[-1]
+    TIMEFRAMES = [("1W", 7), ("2W", 14), ("1M", 30), ("3M", 90), ("6M", 180), ("1Y", 365), ("All", None)]
+
+    if "pv_timeframe" not in st.session_state:
+        st.session_state.pv_timeframe = "1M"
+
+    st.markdown("""
+    <style>
+        .st-key-pv_timeframe div.stButton > button {
+            border-radius: 999px !important; height: 24px; padding: 0 11px !important;
+            font-size: 11px !important; font-weight: 600 !important;
+            border: 1px solid #E6DFCF !important; background: #FFFFFF !important;
+            width: auto !important; min-height: 0 !important;
+        }
+        .st-key-pv_timeframe div.stButton > button:hover { background: #EFE7D8 !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="card" style="padding-bottom:12px;">', unsafe_allow_html=True)
+
+    with st.container(key="pv_timeframe"):
+        tf_cols = st.columns([1.3] + [0.55] * len(TIMEFRAMES) + [0.9] + [3])
+        tf_cols[0].markdown(f"<span style='font-size:13px;font-weight:600;padding-top:2px;display:block'>Portfolio value</span>", unsafe_allow_html=True)
+        for i, (label, _) in enumerate(TIMEFRAMES):
+            active = st.session_state.pv_timeframe == label
+            btn_style = f"background:{BG} !important;border-color:{ACCENT} !important;" if active else ""
+            if tf_cols[i + 1].button(label, key=f"tf_{label}"):
+                st.session_state.pv_timeframe = label
+        custom_active = st.session_state.pv_timeframe == "Custom"
+        if tf_cols[len(TIMEFRAMES) + 1].button("Custom", key="tf_Custom"):
+            st.session_state.pv_timeframe = "Custom"
+
+    if st.session_state.pv_timeframe == "Custom":
+        max_days = max((portfolio_value_series.index.max() - portfolio_value_series.index.min()).days, 1)
+        custom_days = st.slider("Custom lookback (days)", 1, max_days, min(30, max_days), key="pv_custom_days", label_visibility="collapsed")
+        lookback_days = custom_days
+    else:
+        lookback_days = dict(TIMEFRAMES)[st.session_state.pv_timeframe]
+
+    if lookback_days is None:
+        pv_view = portfolio_value_series
+    else:
+        cutoff = portfolio_value_series.index.max() - pd.Timedelta(days=lookback_days)
+        pv_view = portfolio_value_series[portfolio_value_series.index >= cutoff]
+        if len(pv_view) < 2:
+            pv_view = portfolio_value_series.tail(2)
+
+    pv_start = pv_view.iloc[0]
+    pv_end = pv_view.iloc[-1]
     pv_pct = (pv_end - pv_start) / pv_start * 100 if pv_start else 0
     pv_color = GREEN if pv_pct >= 0 else RED
 
     fig_pv = go.Figure(go.Scatter(
-        x=portfolio_value_series.index, y=portfolio_value_series.values,
+        x=pv_view.index, y=pv_view.values,
         mode="lines", line=dict(color=pv_color, width=2),
         fill="tozeroy", fillcolor=pv_color + "22",
     ))
@@ -204,10 +250,13 @@ if portfolio_value_series is not None and len(portfolio_value_series) > 1:
         xaxis=dict(visible=False), yaxis=dict(visible=False),
     )
 
-    st.markdown('<div class="card" style="padding-bottom:4px;">', unsafe_allow_html=True)
-    h1, h2 = st.columns([4, 1])
-    h1.markdown(f"<span style='font-size:13px;font-weight:600'>Portfolio value · last {len(portfolio_value_series)} sessions</span>", unsafe_allow_html=True)
-    h2.markdown(f"<div style='text-align:right'><span class='num' style='font-size:12px;font-weight:600;color:{pv_color}'>{pv_pct:+.1f}% over period</span></div>", unsafe_allow_html=True)
+    label_txt = st.session_state.pv_timeframe if st.session_state.pv_timeframe != "Custom" else f"last {lookback_days}d"
+    st.markdown(
+        f"<div style='display:flex;justify-content:space-between;align-items:baseline;margin:4px 0'>"
+        f"<span style='font-size:12px;color:{MUTED}'>{label_txt} · {len(pv_view)} sessions</span>"
+        f"<span class='num' style='font-size:12px;font-weight:600;color:{pv_color}'>{pv_pct:+.1f}% over period</span></div>",
+        unsafe_allow_html=True,
+    )
     st.plotly_chart(fig_pv, use_container_width=True, config={"displayModeBar": False})
     st.markdown('</div>', unsafe_allow_html=True)
     st.write("")
@@ -246,6 +295,8 @@ if "sort_key" not in st.session_state:
     st.session_state.sort_key, st.session_state.sort_dir = "Rank", "asc"
 
 SORT_OPTIONS = [("Rank", "Rank"), ("Day %", "Day %"), ("P&L %", "P&L %"), ("Allocation", "Allocation %")]
+TABLE_BG = "#EFE6D3"   # darker beige for the holdings table
+COL_WIDTHS = [0.5, 2, 1.3, 1.3, 1.2, 1.2, 0.6]
 
 st.markdown("""
 <style>
@@ -256,20 +307,13 @@ st.markdown("""
         width: auto !important; min-height: 0 !important;
     }
     .st-key-sort_pills div.stButton > button:hover { background: #EFE7D8 !important; }
+
+    .st-key-holdings_rows div[data-testid="stHorizontalBlock"],
+    #holdings-hdr {
+        gap: 4px !important;
+    }
 </style>
 """, unsafe_allow_html=True)
-
-with st.container(key="sort_pills"):
-    sp_cols = st.columns([0.5] + [0.7] * len(SORT_OPTIONS) + [4])
-    sp_cols[0].markdown(f"<span style='font-size:11px;font-weight:600;color:{MUTED};text-transform:uppercase'>Sort</span>", unsafe_allow_html=True)
-    for i, (label, col) in enumerate(SORT_OPTIONS):
-        active = st.session_state.sort_key == col
-        arrow = ("↑" if st.session_state.sort_dir == "asc" else "↓") if active else ""
-        if sp_cols[i + 1].button(f"{label} {arrow}".strip(), key=f"sortpill_{col}"):
-            if active:
-                st.session_state.sort_dir = "desc" if st.session_state.sort_dir == "asc" else "asc"
-            else:
-                st.session_state.sort_key, st.session_state.sort_dir = col, "asc" if col == "Rank" else "desc"
 
 df_sorted = df_sorted.sort_values(
     st.session_state.sort_key,
@@ -280,8 +324,21 @@ df_sorted = df_sorted.sort_values(
 col_table, col_detail = st.columns([2, 1], gap="medium")
 
 with col_table:
-    st.markdown('<div class="card" style="padding:0;overflow:hidden;">', unsafe_allow_html=True)
-    hdr = st.columns([0.5, 2, 1.3, 1.3, 1.2, 1.2, 0.6])
+    st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{TABLE_BG};">', unsafe_allow_html=True)
+
+    with st.container(key="sort_pills"):
+        sp_cols = st.columns([0.6] + [0.55] * len(SORT_OPTIONS) + [3.2])
+        sp_cols[0].markdown(f"<span style='font-size:11px;font-weight:600;color:{MUTED};text-transform:uppercase;padding-top:4px;display:block'>Sort</span>", unsafe_allow_html=True)
+        for i, (label, col) in enumerate(SORT_OPTIONS):
+            active = st.session_state.sort_key == col
+            arrow = ("↑" if st.session_state.sort_dir == "asc" else "↓") if active else ""
+            if sp_cols[i + 1].button(f"{label} {arrow}".strip(), key=f"sortpill_{col}"):
+                if active:
+                    st.session_state.sort_dir = "desc" if st.session_state.sort_dir == "asc" else "asc"
+                else:
+                    st.session_state.sort_key, st.session_state.sort_dir = col, "asc" if col == "Rank" else "desc"
+
+    hdr = st.columns(COL_WIDTHS, gap="small")
     for h, label in zip(hdr, ["RANK", "STOCK", "CMP", "EXPOSURE", "DAY %", "P&L %", "TREND"]):
         h.markdown(f"<span style='font-size:11px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
 
@@ -296,7 +353,7 @@ with col_table:
             exposure_disp = f"₹{r['Value']:,.0f}" if pd.notna(r["Value"]) else "—"
             dot = GREEN if r["EMA Cross Bearish"] is False else (RED if r["EMA Cross Bearish"] is True else MUTED)
 
-            c1, c2, c3, c4, c5, c6, c7 = st.columns([0.5, 2, 1.3, 1.3, 1.2, 1.2, 0.6])
+            c1, c2, c3, c4, c5, c6, c7 = st.columns(COL_WIDTHS, gap="small")
             c1.markdown(f"<div class='num' style='padding-top:8px;color:{MUTED};font-size:12px'>{r['Rank']}</div>", unsafe_allow_html=True)
             with c2:
                 if st.button(r["Symbol"], key=f"btn_{r['Symbol']}", use_container_width=True):
@@ -424,6 +481,104 @@ with col_b:
     )
     st.plotly_chart(fig2, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# Watchlist — upload a Sigma Scanner export, pick how many go on the watchlist
+# ---------------------------------------------------------------------------
+st.subheader("Watchlist")
+
+WATCHLIST_FILE = "watchlist.csv"
+holding_symbols = set(df["Symbol"].tolist())
+
+st.markdown('<div class="card">', unsafe_allow_html=True)
+
+with st.expander("📤 Upload Sigma Scanner export (.xlsx / .csv)"):
+    uploaded = st.file_uploader("Sigma export", type=["xlsx", "xls", "csv"], label_visibility="collapsed")
+
+    if uploaded is not None:
+        try:
+            src_df = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") else pd.read_excel(uploaded)
+        except Exception as e:
+            src_df = None
+            st.error(f"Couldn't read that file: {e}")
+
+        if src_df is not None:
+            st.dataframe(src_df.head(10), use_container_width=True, hide_index=True)
+
+            cols = src_df.columns.tolist()
+            guess_symbol = next((c for c in cols if "symbol" in c.lower() or "stock" in c.lower()), cols[0])
+            guess_score = next((c for c in cols if "rank" in c.lower() or "perform" in c.lower() or "return" in c.lower() or "score" in c.lower()), cols[-1])
+
+            sc1, sc2 = st.columns(2)
+            symbol_col = sc1.selectbox("Symbol column", cols, index=cols.index(guess_symbol))
+            score_col = sc2.selectbox("Rank / score column", cols, index=cols.index(guess_score))
+
+            n_top = st.slider("How many top-ranked stocks to add to the watchlist?", 1, min(30, len(src_df)), min(10, len(src_df)))
+
+            if st.button("Build watchlist from this file"):
+                ranked = src_df[[symbol_col, score_col]].dropna()
+                ranked.columns = ["Symbol", "Score"]
+                ranked["Symbol"] = ranked["Symbol"].astype(str).str.upper().str.strip()
+                ranked = ranked.sort_values("Score", ascending=False).head(n_top).reset_index(drop=True)
+                ranked.insert(0, "Rank", ranked.index + 1)
+                ranked.to_csv(WATCHLIST_FILE, index=False)
+                st.success(f"Watchlist saved — top {len(ranked)} stocks.")
+                st.rerun()
+
+st.write("")
+
+try:
+    watchlist_df = pd.read_csv(WATCHLIST_FILE)
+except FileNotFoundError:
+    watchlist_df = None
+
+if watchlist_df is None or watchlist_df.empty:
+    st.caption("No watchlist yet — upload a Sigma Scanner export above to build one.")
+else:
+    @st.cache_data(ttl=300)
+    def fetch_watchlist_prices(symbols):
+        out = {}
+        for sym in symbols:
+            try:
+                t = yf.Ticker(sym + ".NS")
+                h = t.history(period="2d")
+                out[sym] = round(float(h["Close"].iloc[-1]), 2) if not h.empty else None
+            except Exception:
+                out[sym] = None
+        return out
+
+    wl_symbols = watchlist_df["Symbol"].tolist()
+    wl_prices = fetch_watchlist_prices(tuple(wl_symbols))
+
+    wl_cols = st.columns(3)
+    for i, wrow in watchlist_df.iterrows():
+        sym = wrow["Symbol"]
+        in_book = sym in holding_symbols
+        cmp = wl_prices.get(sym)
+        cmp_str = f"₹{cmp:,.2f}" if cmp else "—"
+        badge = f"<span style='font-size:9.5px;font-weight:600;color:{GREEN};background:#E9F3EC;border-radius:4px;padding:1px 5px;margin-left:6px'>in book</span>" if in_book else ""
+        card_html = f"""
+        <div style="border:1px dashed #DED4BC;border-radius:8px;padding:14px 16px;margin-bottom:14px">
+          <div style="display:flex;align-items:baseline;justify-content:space-between">
+            <span style="font-size:14px;font-weight:600">{sym}{badge}</span>
+            <span class="num" style="font-size:11px;color:{MUTED}">Rank #{int(wrow['Rank'])}</span>
+          </div>
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-top:4px">
+            <span class="num" style="font-size:14px">{cmp_str}</span>
+            <span class="num" style="font-size:12.5px;font-weight:600;color:{ACCENT}">score {wrow['Score']:.2f}</span>
+          </div>
+        </div>
+        """
+        wl_cols[i % 3].markdown(card_html, unsafe_allow_html=True)
+
+    if st.button("🗑️ Clear watchlist"):
+        import os
+        os.remove(WATCHLIST_FILE)
+        st.rerun()
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.write("")
 
 # ---------------------------------------------------------------------------
 # Footer note
