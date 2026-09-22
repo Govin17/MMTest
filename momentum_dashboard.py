@@ -149,7 +149,7 @@ k5.metric("Below EMA50", f"{n_below50} stocks", delta=None, delta_color="off")
 st.write("")
 
 # ---------------------------------------------------------------------------
-# Holdings — clean overview table, pick a stock below for full detail
+# Holdings — slim table on the left, click a row to see detail on the right
 # ---------------------------------------------------------------------------
 st.subheader("Holdings")
 
@@ -160,7 +160,7 @@ overview = pd.DataFrame({
     "CMP": df_sorted["CMP"],
     "P&L %": df_sorted["P&L %"],
     "Trend": df_sorted["EMA Cross Bearish"].map(
-        lambda b: "🔴 Bearish" if b is True else ("🟢 Bullish" if b is False else "⚪ N/A")
+        lambda b: "🔴" if b is True else ("🟢" if b is False else "⚪")
     ),
 })
 
@@ -171,35 +171,48 @@ def highlight_pnl(val):
     return "color:#4ade80; font-weight:600" if val >= 0 else "color:#ff6b6b; font-weight:600"
 
 
-styled_overview = overview.style.format({"CMP": "₹{:.2f}", "P&L %": "{:+.2f}%"}).map(
+styled_overview = overview.style.format({"CMP": "₹{:.0f}", "P&L %": "{:+.1f}%"}).map(
     highlight_pnl, subset=["P&L %"]
 )
 
-st.dataframe(styled_overview, use_container_width=True, hide_index=True, height=38 * len(overview) + 38)
+col_table, col_detail = st.columns([3, 2])
 
-st.caption("Select a stock to see full details:")
-pick = st.selectbox("Stock detail", df_sorted["Symbol"].tolist(), label_visibility="collapsed")
-row = df_sorted[df_sorted["Symbol"] == pick].iloc[0]
+with col_table:
+    event = st.dataframe(
+        styled_overview,
+        use_container_width=True,
+        hide_index=True,
+        height=35 * len(overview) + 38,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="holdings_table",
+    )
+
+selected_rows = event.selection.rows if event and event.selection else []
+sel_idx = selected_rows[0] if selected_rows else 0
+row = df_sorted.iloc[sel_idx]
 
 value_str = f"₹{row['Value']:,.0f}" if pd.notna(row["Value"]) else "—"
 day_str = f"{row['Day %']:+.2f}%" if pd.notna(row["Day %"]) else "—"
 ema_str = f"₹{row['EMA20']:.2f} / ₹{row['EMA50']:.2f}" if pd.notna(row["EMA20"]) else "—"
 trend_bullish = not row["EMA Cross Bearish"] if pd.notna(row["EMA Cross Bearish"]) else None
 trend_str = "🟢 Bullish" if trend_bullish else ("🔴 Bearish" if trend_bullish is False else "⚪ N/A")
+pnl_str = f"{row['P&L %']:+.2f}% (₹{row['P&L ₹']:+,.0f})" if pd.notna(row["P&L %"]) else "—"
 
-with st.container(border=True):
-    d1, d2, d3 = st.columns(3)
-    d1.metric("Shares", f"{row['Shares']}")
-    d1.metric("Avg Price", f"₹{row['Avg Price']:.2f}")
-    d2.metric("Invested", f"₹{row['Invested']:,.0f}")
-    d2.metric("Current Value", value_str)
-    d3.metric("Day Change", day_str)
-    d3.metric("EMA20 / EMA50", ema_str)
-    st.caption(
-        f"Below EMA20: {'🔴 Yes' if row['Below EMA20'] else '🟢 No'}   •   "
-        f"Below EMA50: {'🔴 Yes' if row['Below EMA50'] else '🟢 No'}   •   "
-        f"Trend: {trend_str}"
-    )
+with col_detail:
+    with st.container(border=True):
+        st.markdown(f"#### {row['Symbol']}")
+        st.markdown(f"**CMP:** ₹{row['CMP']:.2f}  ·  **Day:** {day_str}")
+        st.markdown(f"**P&L:** {pnl_str}")
+        st.markdown(f"**Trend:** {trend_str}")
+        st.divider()
+        st.markdown(f"**Shares:** {row['Shares']}  ·  **Avg Price:** ₹{row['Avg Price']:.2f}")
+        st.markdown(f"**Invested:** ₹{row['Invested']:,.0f}  ·  **Current Value:** {value_str}")
+        st.markdown(f"**EMA20 / EMA50:** {ema_str}")
+        st.caption(
+            f"Below EMA20: {'🔴 Yes' if row['Below EMA20'] else '🟢 No'}   •   "
+            f"Below EMA50: {'🔴 Yes' if row['Below EMA50'] else '🟢 No'}"
+        )
 
 st.write("")
 
