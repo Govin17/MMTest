@@ -176,6 +176,18 @@ st.markdown(f"""
         padding: 0 !important; border-radius: 50% !important; font-size: 13px !important;
         margin-top: 6px; text-align: center !important;
     }}
+
+    /* Card-styled containers (st.container(key=...)) — avoids the empty-bar
+       bug that literal <div>...</div> markdown pairs cause around widgets */
+    .st-key-pp_selector, .st-key-pp_create, .st-key-pp_trade_ticket,
+    .st-key-wl_create_row {{
+        background: {CARD_UPLOAD}; border: 1px solid {BORDER}; border-radius: 10px;
+        padding: 18px 20px; margin-bottom: 10px;
+    }}
+    .st-key-pp_metrics {{
+        background: {CARD_ALT}; border: 1px solid {BORDER}; border-radius: 10px;
+        padding: 18px 20px; margin-bottom: 6px;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -985,32 +997,38 @@ def render_paper_trading_tab():
     if "active_portfolio" not in st.session_state or st.session_state.active_portfolio not in portfolio_names:
         st.session_state.active_portfolio = portfolio_names[0]
 
-    # -- Portfolio selector / create / delete ----------------------------
-    st.markdown('<div class="card-upload">', unsafe_allow_html=True)
-    p1, p2, p3, p4 = st.columns([1.6, 1.6, 1, 1])
-    active_portfolio = p1.selectbox("Active portfolio", portfolio_names,
-                                     index=portfolio_names.index(st.session_state.active_portfolio),
-                                     key="portfolio_selector")
-    st.session_state.active_portfolio = active_portfolio
+    col_main, col_tools = st.columns([2.6, 1], gap="medium")
 
-    new_port_name = p2.text_input("New portfolio name", key="new_port_name", placeholder="e.g. Aggressive Momentum")
-    new_port_cash = p3.number_input("Starting cash", min_value=1000.0, value=100000.0, step=5000.0, key="new_port_cash")
-    if p4.button("➕ Create portfolio", use_container_width=True) and new_port_name.strip():
-        if new_port_name.strip() not in portfolios:
-            portfolios[new_port_name.strip()] = {"starting_cash": new_port_cash}
-            save_portfolios(portfolios)
-            st.session_state.active_portfolio = new_port_name.strip()
-            st.rerun()
-        else:
-            st.warning("A portfolio with that name already exists.")
+    # ======================================================================
+    # RIGHT: portfolio selector / create / delete + trade ticket
+    # ======================================================================
+    with col_tools:
+        with st.container(key="pp_selector"):
+            active_portfolio = st.selectbox(
+                "Active portfolio", portfolio_names,
+                index=portfolio_names.index(st.session_state.active_portfolio),
+                key="portfolio_selector",
+            )
+            st.session_state.active_portfolio = active_portfolio
 
-    if len(portfolio_names) > 1 and st.button(f"🗑️ Delete \"{active_portfolio}\" portfolio", key="del_portfolio"):
-        del portfolios[active_portfolio]
-        save_portfolios(portfolios)
-        st.session_state.active_portfolio = list(portfolios.keys())[0]
-        st.rerun()
+            if len(portfolio_names) > 1 and st.button(f"🗑️ Delete \"{active_portfolio}\"", key="del_portfolio", use_container_width=True):
+                del portfolios[active_portfolio]
+                save_portfolios(portfolios)
+                st.session_state.active_portfolio = list(portfolios.keys())[0]
+                st.rerun()
 
-    st.markdown('</div>', unsafe_allow_html=True)
+        with st.container(key="pp_create"):
+            st.markdown(f"<div style='font-size:13px;font-weight:600;color:{MUTED};margin-bottom:4px'>Create new portfolio</div>", unsafe_allow_html=True)
+            new_port_name = st.text_input("New portfolio name", key="new_port_name", placeholder="e.g. Aggressive Momentum", label_visibility="collapsed")
+            new_port_cash = st.number_input("Starting cash", min_value=1000.0, value=100000.0, step=5000.0, key="new_port_cash")
+            if st.button("➕ Create portfolio", use_container_width=True) and new_port_name.strip():
+                if new_port_name.strip() not in portfolios:
+                    portfolios[new_port_name.strip()] = {"starting_cash": new_port_cash}
+                    save_portfolios(portfolios)
+                    st.session_state.active_portfolio = new_port_name.strip()
+                    st.rerun()
+                else:
+                    st.warning("A portfolio with that name already exists.")
 
     starting_cash = portfolios[active_portfolio]["starting_cash"]
     trades = load_paper_trades()
@@ -1019,6 +1037,7 @@ def render_paper_trading_tab():
 
     live_prices = fetch_watchlist_prices(tuple(open_symbols)) if open_symbols else {}
 
+    invested_value = sum(positions[s]["qty"] * positions[s]["avg"] for s in open_symbols)
     holdings_value = sum((positions[s]["qty"] * (live_prices.get(s) or positions[s]["avg"])) for s in open_symbols)
     unrealized_pnl = sum(
         (positions[s]["qty"] * ((live_prices.get(s) or positions[s]["avg"]) - positions[s]["avg"]))
@@ -1026,111 +1045,116 @@ def render_paper_trading_tab():
     )
     total_value = cash + holdings_value
     total_pnl = total_value - starting_cash
+    returns_pct = (holdings_value - invested_value) / invested_value * 100 if invested_value else 0
 
-    st.markdown('<div class="card-alt">', unsafe_allow_html=True)
-    st.caption(f"\"{active_portfolio}\" — practice with virtual money, trades execute at the live CMP, no real capital involved.")
+    with col_tools:
+        with st.container(key="pp_trade_ticket"):
+            watchlists = load_watchlists()
+            universe = sorted(set(df["Symbol"].tolist()) | set(open_symbols))
+            for wl in watchlists.values():
+                universe = sorted(set(universe) | {s["Symbol"] for s in wl.get("stocks", [])})
 
-    k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Cash", f"₹{cash:,.0f}")
-    k2.metric("Holdings Value", f"₹{holdings_value:,.0f}")
-    k3.metric("Total Value", f"₹{total_value:,.0f}", f"{(total_pnl / starting_cash * 100):+.2f}%")
-    k4.metric("Realized P&L", f"₹{realized_pnl:,.0f}")
-    k5.metric("Unrealized P&L", f"₹{unrealized_pnl:,.0f}")
+            st.markdown(f"<div style='font-size:14px;font-weight:600;margin-bottom:10px'>Place a trade — {active_portfolio}</div>", unsafe_allow_html=True)
 
-    st.markdown('</div>', unsafe_allow_html=True)
+            symbol_choice = st.selectbox("Symbol", universe if universe else ["—"], key="paper_symbol")
+            manual_symbol = st.text_input("Or type a symbol not listed", key="paper_symbol_manual", placeholder="e.g. TCS")
+            trade_symbol = manual_symbol.strip().upper() if manual_symbol.strip() else symbol_choice
 
-    # -- Trade ticket --------------------------------------------------
-    watchlists = load_watchlists()
-    universe = sorted(set(df["Symbol"].tolist()) | set(open_symbols))
-    for wl in watchlists.values():
-        universe = sorted(set(universe) | {s["Symbol"] for s in wl.get("stocks", [])})
+            qty = st.number_input("Qty", min_value=1, value=1, step=1, key="paper_qty")
 
-    st.markdown('<div class="card-upload">', unsafe_allow_html=True)
-    st.markdown(f"<div style='font-size:14px;font-weight:600;margin-bottom:12px'>Place a paper trade — {active_portfolio}</div>", unsafe_allow_html=True)
+            live_price = fetch_watchlist_prices((trade_symbol,)).get(trade_symbol) if trade_symbol and trade_symbol != "—" else None
+            st.markdown(
+                f"<div style='font-size:13px;color:{MUTED};margin-bottom:2px'>Live CMP</div>"
+                f"<div class='num' style='font-size:17px;font-weight:600;margin-bottom:10px'>{f'₹{live_price:.2f}' if live_price else '—'}</div>",
+                unsafe_allow_html=True,
+            )
 
-    t1, t2, t3, t4, t5 = st.columns([1.6, 0.9, 0.9, 0.9, 0.9])
-    symbol_choice = t1.selectbox("Symbol", universe if universe else ["—"], key="paper_symbol")
-    manual_symbol = t1.text_input("Or type a symbol not listed", key="paper_symbol_manual", placeholder="e.g. TCS")
-    trade_symbol = manual_symbol.strip().upper() if manual_symbol.strip() else symbol_choice
+            bcol, scol = st.columns(2)
+            buy_clicked = bcol.button("🟢 Buy", use_container_width=True, key="buy_btn")
+            sell_clicked = scol.button("🔴 Sell", use_container_width=True, key="sell_btn")
 
-    qty = t2.number_input("Qty", min_value=1, value=1, step=1, key="paper_qty")
+            if (buy_clicked or sell_clicked) and trade_symbol and trade_symbol != "—":
+                if live_price is None:
+                    st.error(f"Couldn't fetch a live price for {trade_symbol} — check the ticker.")
+                elif buy_clicked and qty * live_price > cash:
+                    st.error(f"Not enough paper cash: need ₹{qty * live_price:,.0f}, have ₹{cash:,.0f}.")
+                elif sell_clicked and positions.get(trade_symbol, {"qty": 0})["qty"] < qty:
+                    st.error(f"Can't sell {qty} — you only hold {positions.get(trade_symbol, {'qty': 0})['qty']} of {trade_symbol} in {active_portfolio}.")
+                else:
+                    save_paper_trade(active_portfolio, trade_symbol, "BUY" if buy_clicked else "SELL", qty, live_price)
+                    st.success(f"{'Bought' if buy_clicked else 'Sold'} {qty} {trade_symbol} @ ₹{live_price:.2f} in {active_portfolio}")
+                    st.rerun()
 
-    live_price = fetch_watchlist_prices((trade_symbol,)).get(trade_symbol) if trade_symbol and trade_symbol != "—" else None
-    t3.markdown(
-        f"<div style='font-size:13px;color:{MUTED};margin-bottom:4px'>Live CMP</div>"
-        f"<div class='num' style='font-size:17px;font-weight:600;padding-top:4px'>{f'₹{live_price:.2f}' if live_price else '—'}</div>",
-        unsafe_allow_html=True,
-    )
+    # ======================================================================
+    # LEFT: metrics, open positions, trade history — always visible
+    # ======================================================================
+    with col_main:
+        with st.container(key="pp_metrics"):
+            st.caption(f"\"{active_portfolio}\" — practice with virtual money, trades execute at the live CMP, no real capital involved.")
 
-    buy_clicked = t4.button("🟢 Buy", use_container_width=True, key="buy_btn")
-    sell_clicked = t5.button("🔴 Sell", use_container_width=True, key="sell_btn")
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Cash", f"₹{cash:,.0f}")
+            k2.metric("Total Value", f"₹{total_value:,.0f}", f"{(total_pnl / starting_cash * 100):+.2f}%")
+            k3.metric("Invested", f"₹{invested_value:,.0f}")
+            k4.metric("Returns", f"{returns_pct:+.2f}%")
 
-    if (buy_clicked or sell_clicked) and trade_symbol and trade_symbol != "—":
-        if live_price is None:
-            st.error(f"Couldn't fetch a live price for {trade_symbol} — check the ticker.")
-        elif buy_clicked and qty * live_price > cash:
-            st.error(f"Not enough paper cash: need ₹{qty * live_price:,.0f}, have ₹{cash:,.0f}.")
-        elif sell_clicked and positions.get(trade_symbol, {"qty": 0})["qty"] < qty:
-            st.error(f"Can't sell {qty} — you only hold {positions.get(trade_symbol, {'qty': 0})['qty']} of {trade_symbol} in {active_portfolio}.")
+            j1, j2, j3 = st.columns(3)
+            j1.metric("Stocks Held", f"{len(open_symbols)}")
+            j2.metric("Realized P&L", f"₹{realized_pnl:,.0f}")
+            j3.metric("Unrealized P&L", f"₹{unrealized_pnl:,.0f}")
+
+        # -- Open positions ----------------------------------------------------
+        st.subheader(f"Open Positions — {active_portfolio}")
+        if not open_symbols:
+            st.caption("No open positions yet — place a trade on the right or from a linked Watchlist.")
         else:
-            save_paper_trade(active_portfolio, trade_symbol, "BUY" if buy_clicked else "SELL", qty, live_price)
-            st.success(f"{'Bought' if buy_clicked else 'Sold'} {qty} {trade_symbol} @ ₹{live_price:.2f} in {active_portfolio}")
-            st.rerun()
+            technicals = fetch_technicals(tuple(open_symbols))
 
-    st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
+            pos_cols = [1.6, 0.8, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
+            pcols = st.columns(pos_cols)
+            for h, label in zip(pcols, ["STOCK", "QTY", "BUY PRICE", "CMP", "P&L %", "BELOW EMA20", "BELOW EMA50", "DEAD CROSS"]):
+                h.markdown(f"<span style='font-size:12px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
 
-    # -- Open positions ----------------------------------------------------
-    st.subheader(f"Open Positions — {active_portfolio}")
-    if not open_symbols:
-        st.caption("No open positions yet — place a trade above or from a linked Watchlist.")
-    else:
-        technicals = fetch_technicals(tuple(open_symbols))
+            for sym in open_symbols:
+                pos = positions[sym]
+                cmp = live_prices.get(sym) or pos["avg"]
+                pnl_pct = ((cmp - pos["avg"]) / pos["avg"] * 100) if pos["avg"] else 0
+                pnl_color = GREEN if pnl_pct >= 0 else RED
 
-        st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
-        pos_cols = [1.6, 0.8, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
-        pcols = st.columns(pos_cols)
-        for h, label in zip(pcols, ["STOCK", "QTY", "BUY PRICE", "CMP", "P&L %", "BELOW EMA20", "BELOW EMA50", "DEAD CROSS"]):
-            h.markdown(f"<span style='font-size:12px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
+                tech = technicals.get(sym)
+                if tech:
+                    below20_str = "🔴 Yes" if cmp < tech["ema20"] else "🟢 No"
+                    below50_str = "🔴 Yes" if cmp < tech["ema50"] else "🟢 No"
+                    dead_cross_str = "🔴 Yes" if tech["ema20"] < tech["ema50"] else "🟢 No"
+                else:
+                    below20_str = below50_str = dead_cross_str = "—"
 
-        for sym in open_symbols:
-            pos = positions[sym]
-            cmp = live_prices.get(sym) or pos["avg"]
-            pnl_pct = ((cmp - pos["avg"]) / pos["avg"] * 100) if pos["avg"] else 0
-            pnl_color = GREEN if pnl_pct >= 0 else RED
+                pc = st.columns(pos_cols)
+                pc[0].markdown(f"<div style='padding-top:6px;font-weight:600'>{sym}</div>", unsafe_allow_html=True)
+                pc[1].markdown(f"<div class='num' style='padding-top:6px'>{pos['qty']}</div>", unsafe_allow_html=True)
+                pc[2].markdown(f"<div class='num' style='padding-top:6px'>₹{pos['avg']:.2f}</div>", unsafe_allow_html=True)
+                pc[3].markdown(f"<div class='num' style='padding-top:6px'>₹{cmp:.2f}</div>", unsafe_allow_html=True)
+                pc[4].markdown(f"<div class='num' style='padding-top:6px;color:{pnl_color};font-weight:600'>{pnl_pct:+.1f}%</div>", unsafe_allow_html=True)
+                pc[5].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{below20_str}</div>", unsafe_allow_html=True)
+                pc[6].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{below50_str}</div>", unsafe_allow_html=True)
+                pc[7].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{dead_cross_str}</div>", unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
-            tech = technicals.get(sym)
-            if tech:
-                below20_str = "🔴 Yes" if cmp < tech["ema20"] else "🟢 No"
-                below50_str = "🔴 Yes" if cmp < tech["ema50"] else "🟢 No"
-                dead_cross_str = "🔴 Yes" if tech["ema20"] < tech["ema50"] else "🟢 No"
-            else:
-                below20_str = below50_str = dead_cross_str = "—"
+        # -- Trade history --------------------------------------------------
+        st.subheader(f"Trade History — {active_portfolio}")
+        port_trades = trades[trades["Portfolio"] == active_portfolio] if not trades.empty else trades
+        if port_trades.empty:
+            st.caption("No trades yet in this portfolio.")
+        else:
+            hist = port_trades.sort_values("Timestamp", ascending=False).copy()
+            hist["Timestamp"] = hist["Timestamp"].dt.strftime("%d %b %Y, %H:%M")
+            st.dataframe(hist.drop(columns=["Portfolio"]), use_container_width=True, hide_index=True)
 
-            pc = st.columns(pos_cols)
-            pc[0].markdown(f"<div style='padding-top:6px;font-weight:600'>{sym}</div>", unsafe_allow_html=True)
-            pc[1].markdown(f"<div class='num' style='padding-top:6px'>{pos['qty']}</div>", unsafe_allow_html=True)
-            pc[2].markdown(f"<div class='num' style='padding-top:6px'>₹{pos['avg']:.2f}</div>", unsafe_allow_html=True)
-            pc[3].markdown(f"<div class='num' style='padding-top:6px'>₹{cmp:.2f}</div>", unsafe_allow_html=True)
-            pc[4].markdown(f"<div class='num' style='padding-top:6px;color:{pnl_color};font-weight:600'>{pnl_pct:+.1f}%</div>", unsafe_allow_html=True)
-            pc[5].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{below20_str}</div>", unsafe_allow_html=True)
-            pc[6].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{below50_str}</div>", unsafe_allow_html=True)
-            pc[7].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{dead_cross_str}</div>", unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    # -- Trade history --------------------------------------------------
-    st.subheader(f"Trade History — {active_portfolio}")
-    port_trades = trades[trades["Portfolio"] == active_portfolio] if not trades.empty else trades
-    if port_trades.empty:
-        st.caption("No trades yet in this portfolio.")
-    else:
-        hist = port_trades.sort_values("Timestamp", ascending=False).copy()
-        hist["Timestamp"] = hist["Timestamp"].dt.strftime("%d %b %Y, %H:%M")
-        st.dataframe(hist.drop(columns=["Portfolio"]), use_container_width=True, hide_index=True)
-
-        if st.button(f"🗑️ Reset \"{active_portfolio}\" (clear its trades)"):
-            trades = trades[trades["Portfolio"] != active_portfolio]
-            trades.to_csv(PAPER_TRADES_FILE, index=False)
-            st.rerun()
+            if st.button(f"🗑️ Reset \"{active_portfolio}\" (clear its trades)"):
+                trades = trades[trades["Portfolio"] != active_portfolio]
+                trades.to_csv(PAPER_TRADES_FILE, index=False)
+                st.rerun()
 
 
 # ---------------------------------------------------------------------------
