@@ -188,6 +188,11 @@ st.markdown(f"""
         background: {CARD_ALT}; border: 1px solid {BORDER}; border-radius: 10px;
         padding: 18px 20px; margin-bottom: 6px;
     }}
+
+    [data-testid="stExpander"] {{
+        background: {CARD_TABLE}; border: 1px solid {BORDER}; border-radius: 10px;
+    }}
+    [data-testid="stExpander"] summary {{ font-weight: 600; font-size: 15px; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -908,7 +913,15 @@ def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, 
         wl_detail = fetch_watchlist_detail(tuple(wl_symbols))
 
         linked_portfolio = active_wl.get("linked_portfolio")
-        trade_portfolio = linked_portfolio if linked_portfolio in portfolio_names else (portfolio_names[0] if portfolio_names else None)
+        session_active_portfolio = st.session_state.get("active_portfolio")
+        if linked_portfolio in portfolio_names:
+            trade_portfolio = linked_portfolio
+        elif session_active_portfolio in portfolio_names:
+            trade_portfolio = session_active_portfolio
+        elif portfolio_names:
+            trade_portfolio = portfolio_names[0]
+        else:
+            trade_portfolio = None
 
         trades = load_paper_trades()
         if trade_portfolio:
@@ -1142,19 +1155,19 @@ def render_paper_trading_tab():
             st.markdown('</div>', unsafe_allow_html=True)
 
         # -- Trade history --------------------------------------------------
-        st.subheader(f"Trade History — {active_portfolio}")
         port_trades = trades[trades["Portfolio"] == active_portfolio] if not trades.empty else trades
-        if port_trades.empty:
-            st.caption("No trades yet in this portfolio.")
-        else:
-            hist = port_trades.sort_values("Timestamp", ascending=False).copy()
-            hist["Timestamp"] = hist["Timestamp"].dt.strftime("%d %b %Y, %H:%M")
-            st.dataframe(hist.drop(columns=["Portfolio"]), use_container_width=True, hide_index=True)
+        with st.expander(f"Trade History — {active_portfolio} ({len(port_trades)})", expanded=False):
+            if port_trades.empty:
+                st.caption("No trades yet in this portfolio.")
+            else:
+                hist = port_trades.sort_values("Timestamp", ascending=False).copy()
+                hist["Timestamp"] = hist["Timestamp"].dt.strftime("%d %b %Y, %H:%M")
+                st.dataframe(hist.drop(columns=["Portfolio"]), use_container_width=True, hide_index=True)
 
-            if st.button(f"🗑️ Reset \"{active_portfolio}\" (clear its trades)"):
-                trades = trades[trades["Portfolio"] != active_portfolio]
-                trades.to_csv(PAPER_TRADES_FILE, index=False)
-                st.rerun()
+                if st.button(f"🗑️ Reset \"{active_portfolio}\" (clear its trades)"):
+                    trades = trades[trades["Portfolio"] != active_portfolio]
+                    trades.to_csv(PAPER_TRADES_FILE, index=False)
+                    st.rerun()
 
 
 # ---------------------------------------------------------------------------
