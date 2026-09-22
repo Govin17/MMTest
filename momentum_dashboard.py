@@ -49,18 +49,51 @@ st.markdown(f"""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
     .stApp {{ background: {BG}; font-family: 'Public Sans', sans-serif; }}
-    .block-container {{ padding-top: 1.8rem; padding-bottom: 2rem; }}
+    .block-container {{ padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1400px; }}
     h1, h2, h3, h4 {{ font-family: 'Source Serif 4', serif; color: {INK}; letter-spacing: -0.01em; }}
-    p, span, div, label {{ color: {INK}; font-size: 14px; }}
-    .stCaption, [data-testid="stCaptionContainer"] {{ color: {MUTED} !important; font-size: 13px !important; }}
+    h1 {{ font-size: 2.1rem !important; }}
+    h2 {{ font-size: 1.5rem !important; }}
+    h3 {{ font-size: 1.2rem !important; }}
+    p, span, div, label {{ color: {INK}; font-size: 15.5px; }}
+    .stCaption, [data-testid="stCaptionContainer"] {{ color: {MUTED} !important; font-size: 14px !important; }}
     .num {{ font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }}
-    .element-container {{ margin-bottom: 0.35rem !important; }}
+    .element-container {{ margin-bottom: 0.2rem !important; }}
+    div[data-testid="stVerticalBlockBorderWrapper"] {{ margin-bottom: 0.3rem; }}
 
     [data-testid="stMetric"] {{
-        background: {CARD_ALT}; border: 1px solid {BORDER}; border-radius: 10px; padding: 14px 18px;
+        background: {CARD_ALT}; border: 1px solid {BORDER}; border-radius: 10px; padding: 16px 20px;
     }}
-    [data-testid="stMetricLabel"] {{ font-size: 0.8rem; letter-spacing: 0.03em; text-transform: uppercase; color: {MUTED}; }}
-    [data-testid="stMetricValue"] {{ font-size: 1.55rem; font-weight: 700; color: {INK}; }}
+    [data-testid="stMetricLabel"] {{ font-size: 0.85rem; letter-spacing: 0.03em; text-transform: uppercase; color: {MUTED}; }}
+    [data-testid="stMetricValue"] {{ font-size: 1.9rem; font-weight: 700; color: {INK}; }}
+
+    /* ---- Form controls: force white/light backgrounds with dark text everywhere ---- */
+    [data-baseweb="select"] > div,
+    [data-baseweb="input"] > div,
+    .stTextInput input, .stNumberInput input,
+    [data-baseweb="select"] input,
+    div[data-baseweb="popover"] ul,
+    [data-baseweb="menu"],
+    .stSelectbox div[role="listbox"],
+    [data-testid="stFileUploaderDropzone"],
+    [data-testid="stFileUploaderDropzoneInstructions"] {{
+        background-color: #FFFFFF !important;
+        color: {INK} !important;
+        border-color: {BORDER} !important;
+    }}
+    [data-baseweb="select"] span, [data-baseweb="select"] div,
+    [data-baseweb="menu"] li, [data-baseweb="menu"] li span,
+    [data-testid="stFileUploaderDropzoneInstructions"] span,
+    [data-testid="stFileUploaderDropzoneInstructions"] div {{
+        color: {INK} !important;
+    }}
+    .stTextInput input, .stNumberInput input, [data-baseweb="select"] input {{
+        font-size: 15.5px !important;
+    }}
+    [data-baseweb="select"] > div, .stTextInput input, .stNumberInput input {{
+        border: 1px solid {BORDER} !important; border-radius: 8px !important;
+    }}
+    li[aria-selected="true"] {{ background-color: {CARD_UPLOAD} !important; }}
+    [data-baseweb="menu"] li:hover {{ background-color: {BG} !important; }}
 
     div[data-testid="stVerticalBlock"] div.stButton > button {{
         background: transparent; border: none; box-shadow: none;
@@ -106,7 +139,30 @@ st.markdown(f"""
     }}
     .stTabs [aria-selected="true"] {{ color: {INK} !important; border-bottom: 2px solid {ACCENT} !important; }}
 
-    .stSelectbox label, .stTextInput label, .stNumberInput label, .stSlider label {{ font-size: 13px !important; color: {MUTED} !important; }}
+    .stSelectbox label, .stTextInput label, .stNumberInput label, .stSlider label {{ font-size: 14px !important; color: {MUTED} !important; font-weight: 600; }}
+
+    /* row-select buttons (holdings list) — quiet, left-aligned */
+    div[data-testid="stVerticalBlock"] div.stButton > button {{
+        background: transparent; border: none; box-shadow: none;
+        text-align: left; padding: 5px 8px; width: 100%;
+        border-bottom: 1px solid #F1ECE0; border-radius: 0;
+        font-weight: 600; color: {INK}; min-height: 0; font-size: 15px;
+    }}
+    div[data-testid="stVerticalBlock"] div.stButton > button:hover {{ background: {BG}; }}
+    div[data-testid="stVerticalBlock"] div.stButton > button:focus:not(:active) {{ color: {INK}; }}
+    div.stButton {{ margin: 0; }}
+
+    /* Buy / Sell action buttons — bigger, colored, easy to hit */
+    .st-key-buy_btn button, [class*="st-key-wl_buy_"] button {{
+        background: {GREEN} !important; color: #FFFFFF !important; border: 1px solid {GREEN} !important;
+        font-weight: 700 !important; font-size: 15px !important; min-height: 2.6rem !important;
+        border-radius: 8px !important; width: 100% !important; text-align: center !important;
+    }}
+    .st-key-sell_btn button, [class*="st-key-wl_sell_"] button {{
+        background: {RED} !important; color: #FFFFFF !important; border: 1px solid {RED} !important;
+        font-weight: 700 !important; font-size: 15px !important; min-height: 2.6rem !important;
+        border-radius: 8px !important; width: 100% !important; text-align: center !important;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -477,19 +533,19 @@ def render_holdings_tab():
                 dot = GREEN if r["EMA Cross Bearish"] is False else (RED if r["EMA Cross Bearish"] is True else MUTED)
 
                 c1, c2, c3, c4, c5, c6, c7, _sp = st.columns(COL_WIDTHS)
-                c1.markdown(f"<div class='num' style='padding-top:8px;color:{MUTED};font-size:13px'>{r['Rank']}</div>", unsafe_allow_html=True)
+                c1.markdown(f"<div class='num' style='padding-top:8px;color:{MUTED};font-size:14px'>{r['Rank']}</div>", unsafe_allow_html=True)
                 with c2:
                     if st.button(r["Symbol"], key=f"btn_{r['Symbol']}", use_container_width=True):
                         st.session_state.selected_symbol = r["Symbol"]
                     st.markdown(
-                        f"<div class='num' style='font-size:12px;color:{MUTED};margin-top:-14px;padding:0 8px 4px'>"
+                        f"<div class='num' style='font-size:13px;color:{MUTED};margin-top:-14px;padding:0 8px 4px'>"
                         f"{r['Shares']} sh · avg ₹{r['Avg Price']:.2f}</div>",
                         unsafe_allow_html=True,
                     )
-                c3.markdown(f"<div class='num' style='padding-top:8px'>{cmp_disp}</div>", unsafe_allow_html=True)
-                c4.markdown(f"<div class='num' style='padding-top:8px'>{exposure_disp}</div>", unsafe_allow_html=True)
-                c5.markdown(f"<div class='num' style='padding-top:8px;color:{day_color};font-weight:600'>{day_disp}</div>", unsafe_allow_html=True)
-                c6.markdown(f"<div class='num' style='padding-top:8px;color:{pnl_color};font-weight:600'>{pnl_disp}</div>", unsafe_allow_html=True)
+                c3.markdown(f"<div class='num' style='padding-top:8px;font-size:15px;font-weight:600'>{cmp_disp}</div>", unsafe_allow_html=True)
+                c4.markdown(f"<div class='num' style='padding-top:8px;font-size:15px'>{exposure_disp}</div>", unsafe_allow_html=True)
+                c5.markdown(f"<div class='num' style='padding-top:8px;color:{day_color};font-weight:600;font-size:15px'>{day_disp}</div>", unsafe_allow_html=True)
+                c6.markdown(f"<div class='num' style='padding-top:8px;color:{pnl_color};font-weight:600;font-size:15px'>{pnl_disp}</div>", unsafe_allow_html=True)
                 c7.markdown(f"<div style='padding-top:10px'><span style='width:9px;height:9px;border-radius:50%;background:{dot};display:inline-block'></span></div>", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -507,7 +563,7 @@ def render_holdings_tab():
     with col_detail:
         detail = f"""
         <div class="card-alt">
-          <div style="font-size:12px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:{MUTED};margin-bottom:4px">
+          <div style="font-size:13px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:{MUTED};margin-bottom:4px">
             Selected holding · Rank {row['Rank']} of {len(df_sorted)}
           </div>
           <div style="font-family:'Source Serif 4',serif;font-size:24px;font-weight:600;color:{INK};margin-bottom:14px">{row['Symbol']}</div>
@@ -537,9 +593,9 @@ def render_holdings_tab():
                     f"<span class='dot' style='background:{color};box-shadow:0 0 0 1px {color}'></span>"
                     f"<span class='lbl'>{label}</span></div>"
                 )
-            st.markdown(f"<div style='font-size:12px;color:{MUTED}'>Avg. price vs CMP vs EMAs</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='font-size:13px;color:{MUTED}'>Avg. price vs CMP vs EMAs</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='track-wrap'>{dots}</div>", unsafe_allow_html=True)
-            st.markdown("<div style='height:26px'></div>", unsafe_allow_html=True)
+            st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
             st.markdown("<div style='height:1px;background:#EFE9DA;margin:8px 0'></div>", unsafe_allow_html=True)
 
         grid_items = [
@@ -556,7 +612,7 @@ def render_holdings_tab():
         grid_html = "<div style='display:grid;grid-template-columns:1fr 1fr;gap:14px 16px'>"
         for label, value in grid_items:
             grid_html += (
-                f"<div><div style='font-size:12px;color:{MUTED};margin-bottom:3px'>{label}</div>"
+                f"<div><div style='font-size:13px;color:{MUTED};margin-bottom:3px'>{label}</div>"
                 f"<div class='num' style='font-size:15px;font-weight:600'>{value}</div></div>"
             )
         grid_html += "</div></div>"
@@ -779,7 +835,7 @@ def render_watchlist_tab():
             <div style="border:1px dashed #DED4BC;border-radius:8px;padding:14px 16px 8px;margin-bottom:8px;background:{CARD_ALT}">
               <div style="display:flex;align-items:baseline;justify-content:space-between">
                 <span style="font-size:15px;font-weight:600">{sym}{badge}{paper_badge}</span>
-                <span class="num" style="font-size:11.5px;color:{MUTED}">Rank #{wrow['Rank']}</span>
+                <span class="num" style="font-size:13px;color:{MUTED}">Rank #{wrow['Rank']}</span>
               </div>
               <div style="display:flex;align-items:baseline;justify-content:space-between;margin-top:4px">
                 <span class="num" style="font-size:15px">{cmp_str}</span>
@@ -898,13 +954,13 @@ def render_paper_trading_tab():
 
     live_price = fetch_watchlist_prices((trade_symbol,)).get(trade_symbol) if trade_symbol and trade_symbol != "—" else None
     t3.markdown(
-        f"<div style='font-size:12px;color:{MUTED};margin-bottom:4px'>Live CMP</div>"
+        f"<div style='font-size:13px;color:{MUTED};margin-bottom:4px'>Live CMP</div>"
         f"<div class='num' style='font-size:17px;font-weight:600;padding-top:4px'>{f'₹{live_price:.2f}' if live_price else '—'}</div>",
         unsafe_allow_html=True,
     )
 
-    buy_clicked = t4.button("🟢 Buy", use_container_width=True)
-    sell_clicked = t5.button("🔴 Sell", use_container_width=True)
+    buy_clicked = t4.button("🟢 Buy", use_container_width=True, key="buy_btn")
+    sell_clicked = t5.button("🔴 Sell", use_container_width=True, key="sell_btn")
 
     if (buy_clicked or sell_clicked) and trade_symbol and trade_symbol != "—":
         if live_price is None:
