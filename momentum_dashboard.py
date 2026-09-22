@@ -200,15 +200,19 @@ for _, row in df_sorted.iterrows():
 
     header = f"{row['Symbol']:<12}{cmp_str:<14}{pnl_str:<28}{trend_str}"
 
+    value_str = f"₹{row['Value']:,.0f}" if pd.notna(row["Value"]) else "—"
+    day_str = f"{row['Day %']:+.2f}%" if pd.notna(row["Day %"]) else "—"
+    ema_str = f"₹{row['EMA20']:.2f} / ₹{row['EMA50']:.2f}" if pd.notna(row["EMA20"]) else "—"
+
     with st.expander(header):
         st.markdown(
             f"Shares: **{row['Shares']}**  ·  Avg Price: **₹{row['Avg Price']:.2f}**  ·  "
             f"Invested: **₹{row['Invested']:,.0f}**  ·  "
-            f"Current Value: **{'₹' + format(row['Value'], ',.0f') if pd.notna(row['Value']) else '—'}**  ·  "
-            f"Day Change: **{f\"{row['Day %']:+.2f}%\" if pd.notna(row['Day %']) else '—'}**"
+            f"Current Value: **{value_str}**  ·  "
+            f"Day Change: **{day_str}**"
         )
         st.markdown(
-            f"EMA20/EMA50: **{f\"₹{row['EMA20']:.2f} / ₹{row['EMA50']:.2f}\" if pd.notna(row['EMA20']) else '—'}**  ·  "
+            f"EMA20/EMA50: **{ema_str}**  ·  "
             f"Below EMA20: {'🔴 Yes' if row['Below EMA20'] else '🟢 No'}  ·  "
             f"Below EMA50: {'🔴 Yes' if row['Below EMA50'] else '🟢 No'}  ·  "
             f"EMA trend: {trend_str}"
