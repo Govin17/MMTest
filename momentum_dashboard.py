@@ -33,6 +33,8 @@ MUTED = "#8A8171"
 PALETTE = ["#A9713F", "#7A8B5E", "#5B7A99", "#B3703F", "#8B6B9C", "#6E9385",
            "#C08A4F", "#5E7FA6", "#9C7A5E", "#7A9C6E", "#A65E7A", "#6E8B9C"]
 WATCHLIST_FILE = "watchlist.csv"
+PAPER_TRADES_FILE = "paper_trades.csv"
+PAPER_STARTING_CASH = 100000.0
 
 # ---------------------------------------------------------------------------
 # Styling
@@ -573,27 +575,55 @@ def render_watchlist_tab():
         wl_symbols = watchlist_df["Symbol"].tolist()
         wl_prices = fetch_watchlist_prices(tuple(wl_symbols))
 
+        paper_trades = load_paper_trades()
+        paper_positions, paper_cash, _ = compute_paper_positions(paper_trades)
+
         wl_cols = st.columns(3)
         for i, wrow in watchlist_df.iterrows():
             sym = wrow["Symbol"]
             in_book = sym in holding_symbols
             cmp = wl_prices.get(sym)
             cmp_str = f"₹{cmp:,.2f}" if cmp else "—"
+            held_qty = paper_positions.get(sym, {"qty": 0})["qty"]
             badge = f"<span style='font-size:9.5px;font-weight:600;color:{GREEN};background:#E9F3EC;border-radius:4px;padding:1px 5px;margin-left:6px'>in book</span>" if in_book else ""
-            card_html = f"""
-            <div style="border:1px dashed #DED4BC;border-radius:8px;padding:14px 16px;margin-bottom:14px">
-              <div style="display:flex;align-items:baseline;justify-content:space-between">
-                <span style="font-size:14px;font-weight:600">{sym}{badge}</span>
-                <span class="num" style="font-size:11px;color:{MUTED}">Rank #{int(wrow['Rank'])}</span>
-              </div>
-              <div style="display:flex;align-items:baseline;justify-content:space-between;margin-top:4px">
-                <span class="num" style="font-size:14px">{cmp_str}</span>
-                <span class="num" style="font-size:12.5px;font-weight:600;color:{ACCENT}">score {wrow['Score']:.2f}</span>
-              </div>
-            </div>
-            """
-            wl_cols[i % 3].markdown(card_html, unsafe_allow_html=True)
+            paper_badge = f"<span style='font-size:9.5px;font-weight:600;color:{ACCENT};background:#F3EADC;border-radius:4px;padding:1px 5px;margin-left:6px'>paper: {held_qty}</span>" if held_qty else ""
 
+            with wl_cols[i % 3]:
+                st.markdown(f"""
+                <div style="border:1px dashed #DED4BC;border-radius:8px;padding:14px 16px 8px;margin-bottom:8px">
+                  <div style="display:flex;align-items:baseline;justify-content:space-between">
+                    <span style="font-size:14px;font-weight:600">{sym}{badge}{paper_badge}</span>
+                    <span class="num" style="font-size:11px;color:{MUTED}">Rank #{int(wrow['Rank'])}</span>
+                  </div>
+                  <div style="display:flex;align-items:baseline;justify-content:space-between;margin-top:4px">
+                    <span class="num" style="font-size:14px">{cmp_str}</span>
+                    <span class="num" style="font-size:12.5px;font-weight:600;color:{ACCENT}">score {wrow['Score']:.2f}</span>
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                bcol, scol = st.columns(2)
+                buy_click = bcol.button("🟢 Buy 1", key=f"wl_buy_{sym}", use_container_width=True)
+                sell_click = scol.button("🔴 Sell 1", key=f"wl_sell_{sym}", use_container_width=True, disabled=held_qty < 1)
+
+                if buy_click:
+                    if cmp is None:
+                        st.error(f"No live price for {sym} — can't trade.")
+                    elif cmp > paper_cash:
+                        st.error(f"Not enough paper cash (₹{paper_cash:,.0f}) to buy {sym} @ ₹{cmp:.2f}.")
+                    else:
+                        save_paper_trade(sym, "BUY", 1, cmp)
+                        st.success(f"Paper-bought 1 {sym} @ ₹{cmp:.2f}")
+                        st.rerun()
+                if sell_click:
+                    if cmp is None:
+                        st.error(f"No live price for {sym} — can't trade.")
+                    else:
+                        save_paper_trade(sym, "SELL", 1, cmp)
+                        st.success(f"Paper-sold 1 {sym} @ ₹{cmp:.2f}")
+                        st.rerun()
+
+        st.write("")
         if st.button("🗑️ Clear watchlist"):
             os.remove(WATCHLIST_FILE)
             st.rerun()
@@ -601,13 +631,212 @@ def render_watchlist_tab():
     st.markdown('</div>', unsafe_allow_html=True)
 
 
+# =============================================================================
+# TAB: Paper Trading
+# =============================================================================
+def load_paper_trades():
+    try:
+        t = pd.read_csv(PAPER_TRADES_FILE, parse_dates=["Timestamp"])
+        return t
+    except FileNotFoundError:
+        return pd.DataFrame(columns=["Timestamp", "Symbol", "Side", "Qty", "Price", "Amount"])
+
+
+def save_paper_trade(symbol, side, qty, price):
+    trades = load_paper_trades()
+    new_row = pd.DataFrame([{
+        "Timestamp": datetime.now(),
+        "Symbol": symbol,
+        "Side": side,
+        "Qty": qty,
+        "Price": price,
+        "Amount": qty * price,
+    }])
+    trades = pd.concat([trades, new_row], ignore_index=True)
+    trades.to_csv(PAPER_TRADES_FILE, index=False)
+
+
+def compute_paper_positions(trades):
+    """Weighted-average-cost method. Returns (positions_dict, cash, realized_pnl)."""
+    positions = {}   # symbol -> {"qty": int, "avg": float}
+    cash = PAPER_STARTING_CASH
+    realized_pnl = 0.0
+
+    for _, tr in trades.sort_values("Timestamp").iterrows():
+        sym, side, qty, price = tr["Symbol"], tr["Side"], tr["Qty"], tr["Price"]
+        pos = positions.setdefault(sym, {"qty": 0, "avg": 0.0})
+
+        if side == "BUY":
+            new_qty = pos["qty"] + qty
+            pos["avg"] = ((pos["qty"] * pos["avg"]) + (qty * price)) / new_qty if new_qty else 0
+            pos["qty"] = new_qty
+            cash -= qty * price
+        else:  # SELL
+            realized_pnl += (price - pos["avg"]) * qty
+            pos["qty"] -= qty
+            cash += qty * price
+            if pos["qty"] <= 0:
+                pos["qty"] = 0
+                pos["avg"] = 0.0
+
+    return positions, cash, realized_pnl
+
+
+@st.cache_data(ttl=300)
+def fetch_technicals(symbols):
+    """EMA20/EMA50 + dead-cross flag for arbitrary NSE symbols (used by the paper portfolio)."""
+    out = {}
+    for sym in symbols:
+        try:
+            t = yf.Ticker(sym + ".NS")
+            hist = t.history(period="4mo")
+            if len(hist) >= 50:
+                ema20 = round(float(hist["Close"].ewm(span=20, adjust=False).mean().iloc[-1]), 2)
+                ema50 = round(float(hist["Close"].ewm(span=50, adjust=False).mean().iloc[-1]), 2)
+                out[sym] = {"ema20": ema20, "ema50": ema50}
+        except Exception:
+            pass
+    return out
+
+
+def render_paper_trading_tab():
+    trades = load_paper_trades()
+    positions, cash, realized_pnl = compute_paper_positions(trades)
+    open_symbols = [s for s, p in positions.items() if p["qty"] > 0]
+
+    live_prices = fetch_watchlist_prices(tuple(open_symbols)) if open_symbols else {}
+
+    holdings_value = sum((positions[s]["qty"] * (live_prices.get(s) or positions[s]["avg"])) for s in open_symbols)
+    unrealized_pnl = sum(
+        (positions[s]["qty"] * ((live_prices.get(s) or positions[s]["avg"]) - positions[s]["avg"]))
+        for s in open_symbols
+    )
+    total_value = cash + holdings_value
+    total_pnl = total_value - PAPER_STARTING_CASH
+
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.caption("Practice the strategy with virtual money — trades execute at the live CMP, no real capital involved.")
+
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("Cash", f"₹{cash:,.0f}")
+    k2.metric("Holdings Value", f"₹{holdings_value:,.0f}")
+    k3.metric("Total Value", f"₹{total_value:,.0f}", f"{(total_pnl / PAPER_STARTING_CASH * 100):+.2f}%")
+    k4.metric("Realized P&L", f"₹{realized_pnl:,.0f}")
+    k5.metric("Unrealized P&L", f"₹{unrealized_pnl:,.0f}")
+
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.write("")
+
+    # -- Trade ticket --------------------------------------------------
+    universe = sorted(set(df["Symbol"].tolist()) | set(open_symbols))
+    try:
+        wl_df = pd.read_csv(WATCHLIST_FILE)
+        universe = sorted(set(universe) | set(wl_df["Symbol"].tolist()))
+    except FileNotFoundError:
+        pass
+
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown("<div style='font-size:13px;font-weight:600;margin-bottom:12px'>Place a paper trade</div>", unsafe_allow_html=True)
+
+    t1, t2, t3, t4, t5 = st.columns([1.6, 0.9, 0.9, 0.9, 0.9])
+    symbol_choice = t1.selectbox("Symbol", universe if universe else ["—"], key="paper_symbol")
+    manual_symbol = t1.text_input("Or type a symbol not listed", key="paper_symbol_manual", placeholder="e.g. TCS")
+    trade_symbol = manual_symbol.strip().upper() if manual_symbol.strip() else symbol_choice
+
+    qty = t2.number_input("Qty", min_value=1, value=1, step=1, key="paper_qty")
+
+    live_price = fetch_watchlist_prices((trade_symbol,)).get(trade_symbol) if trade_symbol and trade_symbol != "—" else None
+    t3.markdown(
+        f"<div style='font-size:11px;color:{MUTED};margin-bottom:4px'>Live CMP</div>"
+        f"<div class='num' style='font-size:16px;font-weight:600;padding-top:4px'>{f'₹{live_price:.2f}' if live_price else '—'}</div>",
+        unsafe_allow_html=True,
+    )
+
+    buy_clicked = t4.button("🟢 Buy", use_container_width=True)
+    sell_clicked = t5.button("🔴 Sell", use_container_width=True)
+
+    if (buy_clicked or sell_clicked) and trade_symbol and trade_symbol != "—":
+        if live_price is None:
+            st.error(f"Couldn't fetch a live price for {trade_symbol} — check the ticker.")
+        elif buy_clicked and qty * live_price > cash:
+            st.error(f"Not enough paper cash: need ₹{qty * live_price:,.0f}, have ₹{cash:,.0f}.")
+        elif sell_clicked and positions.get(trade_symbol, {"qty": 0})["qty"] < qty:
+            st.error(f"Can't sell {qty} — you only hold {positions.get(trade_symbol, {'qty': 0})['qty']} of {trade_symbol} in paper trading.")
+        else:
+            save_paper_trade(trade_symbol, "BUY" if buy_clicked else "SELL", qty, live_price)
+            st.success(f"{'Bought' if buy_clicked else 'Sold'} {qty} {trade_symbol} @ ₹{live_price:.2f}")
+            st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.write("")
+
+    # -- Open positions (paper portfolio — separate from real Holdings) ------
+    st.subheader("Open Positions — Paper Portfolio")
+    if not open_symbols:
+        st.caption("No open paper positions yet — place a trade above or from the Watchlist.")
+    else:
+        technicals = fetch_technicals(tuple(open_symbols))
+
+        st.markdown('<div class="card" style="padding:0;overflow:hidden;">', unsafe_allow_html=True)
+        pos_cols = [1.6, 0.8, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
+        pcols = st.columns(pos_cols)
+        for h, label in zip(pcols, ["STOCK", "QTY", "BUY PRICE", "CMP", "P&L %", "BELOW EMA20", "BELOW EMA50", "DEAD CROSS"]):
+            h.markdown(f"<span style='font-size:11px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
+
+        for sym in open_symbols:
+            pos = positions[sym]
+            cmp = live_prices.get(sym) or pos["avg"]
+            pnl_pct = ((cmp - pos["avg"]) / pos["avg"] * 100) if pos["avg"] else 0
+            pnl_color = GREEN if pnl_pct >= 0 else RED
+
+            tech = technicals.get(sym)
+            if tech:
+                below20 = cmp < tech["ema20"]
+                below50 = cmp < tech["ema50"]
+                dead_cross = tech["ema20"] < tech["ema50"]
+                below20_str = "🔴 Yes" if below20 else "🟢 No"
+                below50_str = "🔴 Yes" if below50 else "🟢 No"
+                dead_cross_str = "🔴 Yes" if dead_cross else "🟢 No"
+            else:
+                below20_str = below50_str = dead_cross_str = "—"
+
+            pc = st.columns(pos_cols)
+            pc[0].markdown(f"<div style='padding-top:6px;font-weight:600'>{sym}</div>", unsafe_allow_html=True)
+            pc[1].markdown(f"<div class='num' style='padding-top:6px'>{pos['qty']}</div>", unsafe_allow_html=True)
+            pc[2].markdown(f"<div class='num' style='padding-top:6px'>₹{pos['avg']:.2f}</div>", unsafe_allow_html=True)
+            pc[3].markdown(f"<div class='num' style='padding-top:6px'>₹{cmp:.2f}</div>", unsafe_allow_html=True)
+            pc[4].markdown(f"<div class='num' style='padding-top:6px;color:{pnl_color};font-weight:600'>{pnl_pct:+.1f}%</div>", unsafe_allow_html=True)
+            pc[5].markdown(f"<div style='padding-top:6px;font-size:13px'>{below20_str}</div>", unsafe_allow_html=True)
+            pc[6].markdown(f"<div style='padding-top:6px;font-size:13px'>{below50_str}</div>", unsafe_allow_html=True)
+            pc[7].markdown(f"<div style='padding-top:6px;font-size:13px'>{dead_cross_str}</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    st.write("")
+
+    # -- Trade history --------------------------------------------------
+    st.subheader("Trade History")
+    if trades.empty:
+        st.caption("No paper trades yet.")
+    else:
+        hist = trades.sort_values("Timestamp", ascending=False).copy()
+        hist["Timestamp"] = hist["Timestamp"].dt.strftime("%d %b %Y, %H:%M")
+        st.dataframe(hist, use_container_width=True, hide_index=True)
+
+        if st.button("🗑️ Reset paper trading account"):
+            os.remove(PAPER_TRADES_FILE)
+            st.rerun()
+
+
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
-tab_holdings, tab_watchlist = st.tabs(["📊 Holdings", "🔭 Watchlist"])
+tab_holdings, tab_watchlist, tab_paper = st.tabs(["📊 Holdings", "🔭 Watchlist", "📝 Paper Trading"])
 
 with tab_holdings:
     render_holdings_tab()
 
 with tab_watchlist:
     render_watchlist_tab()
+
+with tab_paper:
+    render_paper_trading_tab()
