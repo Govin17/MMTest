@@ -797,177 +797,181 @@ def render_watchlist_tab():
 
 def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, holding_symbols):
     active_wl = watchlists[active_name]
+    stocks = active_wl.get("stocks", [])
 
-    # -- Link to portfolio / delete ---------------------------------------
-    st.markdown('<div class="card-upload">', unsafe_allow_html=True)
-    link1, link2 = st.columns([3, 1])
-    current_link = active_wl.get("linked_portfolio")
-    link_options = ["— none —"] + portfolio_names
-    link_idx = link_options.index(current_link) if current_link in portfolio_names else 0
-    chosen_link = link1.selectbox(
-        f"Portfolio linked to \"{active_name}\" (Buy/Sell here trades this portfolio)",
-        link_options, index=link_idx, key=f"wl_link_{active_name}",
-    )
-    if chosen_link != (current_link or "— none —"):
-        active_wl["linked_portfolio"] = None if chosen_link == "— none —" else chosen_link
-        watchlists[active_name] = active_wl
-        save_watchlists(watchlists)
-        st.rerun()
+    col_main, col_tools = st.columns([2.6, 1], gap="medium")
 
-    if len(watchlists) > 1 and link2.button(f"🗑️ Delete", key=f"wl_delete_{active_name}", use_container_width=True):
-        del watchlists[active_name]
-        save_watchlists(watchlists)
-        st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+    # ======================================================================
+    # RIGHT: tools — link portfolio, delete, upload / add manually
+    # ======================================================================
+    with col_tools:
+        st.markdown('<div class="card-upload">', unsafe_allow_html=True)
+        current_link = active_wl.get("linked_portfolio")
+        link_options = ["— none —"] + portfolio_names
+        link_idx = link_options.index(current_link) if current_link in portfolio_names else 0
+        chosen_link = st.selectbox(
+            f"Portfolio linked to \"{active_name}\"",
+            link_options, index=link_idx, key=f"wl_link_{active_name}",
+        )
+        if chosen_link != (current_link or "— none —"):
+            active_wl["linked_portfolio"] = None if chosen_link == "— none —" else chosen_link
+            watchlists[active_name] = active_wl
+            save_watchlists(watchlists)
+            st.rerun()
+        st.caption("Buy/Sell on the left trades this linked portfolio.")
 
-    # -- Add stocks: upload or manual ------------------------------------
-    st.markdown('<div class="card-upload">', unsafe_allow_html=True)
+        if len(watchlists) > 1 and st.button("🗑️ Delete this watchlist", key=f"wl_delete_{active_name}", use_container_width=True):
+            del watchlists[active_name]
+            save_watchlists(watchlists)
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    up_tab, manual_tab = st.tabs(["📤 Upload Sigma export", "✍️ Add manually"])
+        st.markdown('<div class="card-upload">', unsafe_allow_html=True)
+        up_tab, manual_tab = st.tabs(["📤 Upload", "✍️ Manual"])
 
-    with up_tab:
-        uploaded = st.file_uploader("Sigma export", type=["xlsx", "xls", "csv"], label_visibility="collapsed", key=f"uploader_{active_name}")
-        src_df = None
-        if uploaded is not None:
-            try:
-                if uploaded.name.lower().endswith(".csv"):
-                    src_df = pd.read_csv(uploaded)
+        with up_tab:
+            uploaded = st.file_uploader("Sigma export", type=["xlsx", "xls", "csv"], label_visibility="collapsed", key=f"uploader_{active_name}")
+            src_df = None
+            if uploaded is not None:
+                try:
+                    if uploaded.name.lower().endswith(".csv"):
+                        src_df = pd.read_csv(uploaded)
+                    else:
+                        try:
+                            src_df = pd.read_excel(uploaded)
+                        except ImportError:
+                            st.error(
+                                "Reading .xlsx needs the `openpyxl` package. Run `pip3 install openpyxl` and retry, "
+                                "or export as .csv instead."
+                            )
+                except Exception as e:
+                    st.error(f"Couldn't read that file: {e}")
+
+                if src_df is not None:
+                    cols = src_df.columns.tolist()
+                    guess_symbol = next((c for c in cols if "symbol" in c.lower() or "stock" in c.lower()), cols[0])
+                    guess_score = next((c for c in cols if "rank" in c.lower() or "perform" in c.lower() or "return" in c.lower() or "score" in c.lower()), cols[-1])
+
+                    symbol_col = st.selectbox("Symbol column", cols, index=cols.index(guess_symbol), key=f"symcol_{active_name}")
+                    score_col = st.selectbox("Rank / score column", cols, index=cols.index(guess_score), key=f"scorecol_{active_name}")
+                    n_top = st.slider("Top N to add", 1, min(30, len(src_df)), min(10, len(src_df)), key=f"ntop_{active_name}")
+
+                    if st.button(f"Build \"{active_name}\"", key=f"build_{active_name}", use_container_width=True):
+                        ranked = src_df[[symbol_col, score_col]].dropna()
+                        ranked.columns = ["Symbol", "Score"]
+                        ranked["Symbol"] = ranked["Symbol"].astype(str).str.upper().str.strip()
+                        ranked = ranked.sort_values("Score", ascending=False).head(n_top).reset_index(drop=True)
+                        ranked.insert(0, "Rank", ranked.index + 1)
+                        active_wl["stocks"] = ranked.to_dict("records")
+                        watchlists[active_name] = active_wl
+                        save_watchlists(watchlists)
+                        st.success(f"\"{active_name}\" saved — top {len(ranked)} stocks.")
+                        st.rerun()
+
+        with manual_tab:
+            manual_sym = st.text_input("Symbol (NSE, no .NS)", key=f"manual_sym_{active_name}", placeholder="e.g. TCS")
+            manual_score = st.number_input("Score (optional)", value=0.0, step=0.1, key=f"manual_score_{active_name}")
+            if st.button("➕ Add to watchlist", key=f"manual_add_{active_name}", use_container_width=True) and manual_sym.strip():
+                sym = manual_sym.strip().upper()
+                if any(s["Symbol"] == sym for s in stocks):
+                    st.warning(f"{sym} is already in \"{active_name}\".")
                 else:
-                    try:
-                        src_df = pd.read_excel(uploaded)
-                    except ImportError:
-                        st.error(
-                            "Reading .xlsx needs the `openpyxl` package. Run `pip3 install openpyxl` and retry, "
-                            "or export as .csv instead."
-                        )
-            except Exception as e:
-                st.error(f"Couldn't read that file: {e}")
-
-            if src_df is not None:
-                cols = src_df.columns.tolist()
-                guess_symbol = next((c for c in cols if "symbol" in c.lower() or "stock" in c.lower()), cols[0])
-                guess_score = next((c for c in cols if "rank" in c.lower() or "perform" in c.lower() or "return" in c.lower() or "score" in c.lower()), cols[-1])
-
-                sc1, sc2 = st.columns(2)
-                symbol_col = sc1.selectbox("Symbol column", cols, index=cols.index(guess_symbol), key=f"symcol_{active_name}")
-                score_col = sc2.selectbox("Rank / score column", cols, index=cols.index(guess_score), key=f"scorecol_{active_name}")
-                n_top = st.slider("How many top-ranked stocks to add?", 1, min(30, len(src_df)), min(10, len(src_df)), key=f"ntop_{active_name}")
-
-                if st.button(f"Build \"{active_name}\" from this file", key=f"build_{active_name}"):
-                    ranked = src_df[[symbol_col, score_col]].dropna()
-                    ranked.columns = ["Symbol", "Score"]
-                    ranked["Symbol"] = ranked["Symbol"].astype(str).str.upper().str.strip()
-                    ranked = ranked.sort_values("Score", ascending=False).head(n_top).reset_index(drop=True)
-                    ranked.insert(0, "Rank", ranked.index + 1)
-                    active_wl["stocks"] = ranked.to_dict("records")
+                    stocks.append({"Rank": len(stocks) + 1, "Symbol": sym, "Score": manual_score})
+                    active_wl["stocks"] = stocks
                     watchlists[active_name] = active_wl
                     save_watchlists(watchlists)
-                    st.success(f"\"{active_name}\" saved — top {len(ranked)} stocks.")
                     st.rerun()
 
-    with manual_tab:
-        m1, m2, m3 = st.columns([1.5, 1, 1])
-        manual_sym = m1.text_input("Symbol (NSE, no .NS)", key=f"manual_sym_{active_name}", placeholder="e.g. TCS")
-        manual_score = m2.number_input("Score (optional)", value=0.0, step=0.1, key=f"manual_score_{active_name}")
-        if m3.button("➕ Add to watchlist", key=f"manual_add_{active_name}", use_container_width=True) and manual_sym.strip():
-            sym = manual_sym.strip().upper()
-            stocks = active_wl["stocks"]
-            if any(s["Symbol"] == sym for s in stocks):
-                st.warning(f"{sym} is already in \"{active_name}\".")
-            else:
-                stocks.append({"Rank": len(stocks) + 1, "Symbol": sym, "Score": manual_score})
-                active_wl["stocks"] = stocks
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # ======================================================================
+    # LEFT: the watchlist's stock table (always visible, tools out of the way)
+    # ======================================================================
+    with col_main:
+        if not stocks:
+            st.caption(f"\"{active_name}\" is empty — use the panel on the right to upload a Sigma export or add a symbol manually.")
+            return
+
+        wl_symbols = [s["Symbol"] for s in stocks]
+        wl_detail = fetch_watchlist_detail(tuple(wl_symbols))
+
+        linked_portfolio = active_wl.get("linked_portfolio")
+        trade_portfolio = linked_portfolio if linked_portfolio in portfolio_names else (portfolio_names[0] if portfolio_names else None)
+
+        trades = load_paper_trades()
+        if trade_portfolio:
+            positions, cash, _ = compute_paper_positions(trades, trade_portfolio, portfolios[trade_portfolio]["starting_cash"])
+        else:
+            positions, cash = {}, 0
+
+        if trade_portfolio:
+            st.caption(f"Buy/Sell below trade the **{trade_portfolio}** paper portfolio.")
+        else:
+            st.caption("No paper portfolio exists yet — create one in the Paper Trading tab to enable Buy/Sell here.")
+
+        st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
+        WL_COL_WIDTHS = [2.4, 0.9, 1.15, 1.15, 0.9, 0.55, 0.55, 0.35]
+        hdr = st.columns(WL_COL_WIDTHS)
+        for h, label in zip(hdr, ["COMPANY", "TREND", "MKT PRICE", "1D CHANGE", "1D VOL", "", "", ""]):
+            h.markdown(f"<span style='font-size:12px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
+
+        for wrow in stocks:
+            sym = wrow["Symbol"]
+            in_book = sym in holding_symbols
+            d = wl_detail.get(sym, {})
+            cmp, day_abs, day_pct, volume, spark = d.get("cmp"), d.get("day_abs"), d.get("day_pct"), d.get("volume"), d.get("spark") or []
+            cmp_str = f"₹{cmp:,.2f}" if cmp else "—"
+            day_color = GREEN if (day_pct is not None and day_pct >= 0) else RED
+            day_str = f"{day_abs:+,.2f} ({day_pct:+.2f}%)" if day_abs is not None else "—"
+            vol_str = f"{volume:,}" if volume else "—"
+            held_qty = positions.get(sym, {"qty": 0})["qty"]
+            badge = f"<span style='font-size:10px;font-weight:600;color:{GREEN};background:#1B3B2A;border-radius:4px;padding:1px 5px;margin-left:6px'>in book</span>" if in_book else ""
+            paper_badge = f"<span style='font-size:10px;font-weight:600;color:{ACCENT};background:#33304D;border-radius:4px;padding:1px 5px;margin-left:6px'>paper: {held_qty}</span>" if held_qty else ""
+            spark_color = GREEN if (spark and spark[-1] >= spark[0]) else RED
+
+            rc1, rc2, rc3, rc4, rc5, rc6, rc7, rc8 = st.columns(WL_COL_WIDTHS)
+            with rc1:
+                a1, a2 = st.columns([0.5, 3])
+                a1.markdown(avatar_html(sym), unsafe_allow_html=True)
+                with a2:
+                    a2.markdown(f"<div style='padding-top:4px;font-weight:600;font-size:15px'>{sym}{badge}{paper_badge}</div>", unsafe_allow_html=True)
+                    a2.markdown(f"<div class='num' style='font-size:12.5px;color:{MUTED}'>Rank #{wrow['Rank']} · score {wrow['Score']:.2f}</div>", unsafe_allow_html=True)
+            rc2.markdown(f"<div style='padding-top:10px'>{sparkline_svg(spark, spark_color, width=64)}</div>", unsafe_allow_html=True)
+            rc3.markdown(f"<div class='num' style='padding-top:12px;font-size:15px;font-weight:600'>{cmp_str}</div>", unsafe_allow_html=True)
+            rc4.markdown(f"<div class='num' style='padding-top:12px;font-size:14px;color:{day_color};font-weight:600'>{day_str}</div>", unsafe_allow_html=True)
+            rc5.markdown(f"<div class='num' style='padding-top:12px;font-size:14px;color:{MUTED}'>{vol_str}</div>", unsafe_allow_html=True)
+
+            with rc6:
+                buy_click = st.button("B", key=f"wl_buy_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None)
+            with rc7:
+                sell_click = st.button("S", key=f"wl_sell_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None or held_qty < 1)
+            with rc8:
+                remove_click = st.button("✕", key=f"wl_remove_{active_name}_{sym}", use_container_width=True, help=f"Remove {sym} from this watchlist")
+
+            if buy_click:
+                if cmp is None:
+                    st.error(f"No live price for {sym} — can't trade.")
+                elif cmp > cash:
+                    st.error(f"Not enough paper cash (₹{cash:,.0f}) to buy {sym} @ ₹{cmp:.2f}.")
+                else:
+                    save_paper_trade(trade_portfolio, sym, "BUY", 1, cmp)
+                    st.success(f"Paper-bought 1 {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
+                    st.rerun()
+            if sell_click:
+                if cmp is None:
+                    st.error(f"No live price for {sym} — can't trade.")
+                else:
+                    save_paper_trade(trade_portfolio, sym, "SELL", 1, cmp)
+                    st.success(f"Paper-sold 1 {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
+                    st.rerun()
+            if remove_click:
+                active_wl["stocks"] = [s for s in stocks if s["Symbol"] != sym]
                 watchlists[active_name] = active_wl
                 save_watchlists(watchlists)
                 st.rerun()
 
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    # -- Table for this watchlist's stocks --------------------------------
-    stocks = active_wl.get("stocks", [])
-    if not stocks:
-        st.caption(f"\"{active_name}\" is empty — upload a Sigma export or add a symbol manually above.")
-        return
-
-    wl_symbols = [s["Symbol"] for s in stocks]
-    wl_detail = fetch_watchlist_detail(tuple(wl_symbols))
-
-    linked_portfolio = active_wl.get("linked_portfolio")
-    trade_portfolio = linked_portfolio if linked_portfolio in portfolio_names else (portfolio_names[0] if portfolio_names else None)
-
-    trades = load_paper_trades()
-    if trade_portfolio:
-        positions, cash, _ = compute_paper_positions(trades, trade_portfolio, portfolios[trade_portfolio]["starting_cash"])
-    else:
-        positions, cash = {}, 0
-
-    if trade_portfolio:
-        st.caption(f"Buy/Sell below trade the **{trade_portfolio}** paper portfolio.")
-    else:
-        st.caption("No paper portfolio exists yet — create one in the Paper Trading tab to enable Buy/Sell here.")
-
-    st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
-    WL_COL_WIDTHS = [2.4, 1.0, 1.15, 1.15, 1.0, 0.55, 0.55, 0.35]
-    hdr = st.columns(WL_COL_WIDTHS)
-    for h, label in zip(hdr, ["COMPANY", "TREND", "MKT PRICE", "1D CHANGE", "1D VOL", "", "", ""]):
-        h.markdown(f"<span style='font-size:12px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
-
-    for wrow in stocks:
-        sym = wrow["Symbol"]
-        in_book = sym in holding_symbols
-        d = wl_detail.get(sym, {})
-        cmp, day_abs, day_pct, volume, spark = d.get("cmp"), d.get("day_abs"), d.get("day_pct"), d.get("volume"), d.get("spark") or []
-        cmp_str = f"₹{cmp:,.2f}" if cmp else "—"
-        day_color = GREEN if (day_pct is not None and day_pct >= 0) else RED
-        day_str = f"{day_abs:+,.2f} ({day_pct:+.2f}%)" if day_abs is not None else "—"
-        vol_str = f"{volume:,}" if volume else "—"
-        held_qty = positions.get(sym, {"qty": 0})["qty"]
-        badge = f"<span style='font-size:10px;font-weight:600;color:{GREEN};background:#1B3B2A;border-radius:4px;padding:1px 5px;margin-left:6px'>in book</span>" if in_book else ""
-        paper_badge = f"<span style='font-size:10px;font-weight:600;color:{ACCENT};background:#33304D;border-radius:4px;padding:1px 5px;margin-left:6px'>paper: {held_qty}</span>" if held_qty else ""
-        spark_color = GREEN if (spark and spark[-1] >= spark[0]) else RED
-
-        rc1, rc2, rc3, rc4, rc5, rc6, rc7, rc8 = st.columns(WL_COL_WIDTHS)
-        with rc1:
-            a1, a2 = st.columns([0.5, 3])
-            a1.markdown(avatar_html(sym), unsafe_allow_html=True)
-            with a2:
-                a2.markdown(f"<div style='padding-top:4px;font-weight:600;font-size:15px'>{sym}{badge}{paper_badge}</div>", unsafe_allow_html=True)
-                a2.markdown(f"<div class='num' style='font-size:12.5px;color:{MUTED}'>Rank #{wrow['Rank']} · score {wrow['Score']:.2f}</div>", unsafe_allow_html=True)
-        rc2.markdown(f"<div style='padding-top:10px'>{sparkline_svg(spark, spark_color)}</div>", unsafe_allow_html=True)
-        rc3.markdown(f"<div class='num' style='padding-top:12px;font-size:15px;font-weight:600'>{cmp_str}</div>", unsafe_allow_html=True)
-        rc4.markdown(f"<div class='num' style='padding-top:12px;font-size:14px;color:{day_color};font-weight:600'>{day_str}</div>", unsafe_allow_html=True)
-        rc5.markdown(f"<div class='num' style='padding-top:12px;font-size:14px;color:{MUTED}'>{vol_str}</div>", unsafe_allow_html=True)
-
-        with rc6:
-            buy_click = st.button("B", key=f"wl_buy_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None)
-        with rc7:
-            sell_click = st.button("S", key=f"wl_sell_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None or held_qty < 1)
-        with rc8:
-            remove_click = st.button("✕", key=f"wl_remove_{active_name}_{sym}", use_container_width=True, help=f"Remove {sym} from this watchlist")
-
-        if buy_click:
-            if cmp is None:
-                st.error(f"No live price for {sym} — can't trade.")
-            elif cmp > cash:
-                st.error(f"Not enough paper cash (₹{cash:,.0f}) to buy {sym} @ ₹{cmp:.2f}.")
-            else:
-                save_paper_trade(trade_portfolio, sym, "BUY", 1, cmp)
-                st.success(f"Paper-bought 1 {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
-                st.rerun()
-        if sell_click:
-            if cmp is None:
-                st.error(f"No live price for {sym} — can't trade.")
-            else:
-                save_paper_trade(trade_portfolio, sym, "SELL", 1, cmp)
-                st.success(f"Paper-sold 1 {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
-                st.rerun()
-        if remove_click:
-            active_wl["stocks"] = [s for s in stocks if s["Symbol"] != sym]
-            watchlists[active_name] = active_wl
-            save_watchlists(watchlists)
-            st.rerun()
-
-    st.markdown('</div>', unsafe_allow_html=True)
 
 
 
