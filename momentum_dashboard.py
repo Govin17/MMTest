@@ -53,12 +53,18 @@ st.markdown(f"""
 
     div[data-testid="stVerticalBlock"] div.stButton > button {{
         background: transparent; border: none; box-shadow: none;
-        text-align: left; padding: 10px 8px; width: 100%;
+        text-align: left; padding: 4px 8px; width: 100%;
         border-bottom: 1px solid #F1ECE0; border-radius: 0;
-        font-weight: 600; color: {INK};
+        font-weight: 600; color: {INK}; min-height: 0;
     }}
     div[data-testid="stVerticalBlock"] div.stButton > button:hover {{ background: {BG}; }}
     div[data-testid="stVerticalBlock"] div.stButton > button:focus:not(:active) {{ color: {INK}; }}
+    div.stButton {{ margin: 0; }}
+
+    .st-key-holdings_rows div[data-testid="stHorizontalBlock"] {{
+        gap: 8px; margin-bottom: -14px;
+    }}
+    .st-key-holdings_rows [data-testid="column"] {{ padding-top: 0; padding-bottom: 0; }}
 
     .card {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px; padding: 22px 24px; }}
     .caption-box {{
@@ -92,13 +98,14 @@ HOLDINGS = [
 @st.cache_data(ttl=60)
 def fetch_prices(holdings):
     rows = []
+    price_series = {}   # ticker -> Series of Close, indexed by date (last ~30 sessions)
     for ticker, shares, avg_price in holdings:
         cmp, prev_close, ema20, ema50 = None, None, None, None
         volume, avg_volume, vol_ratio = None, None, None
         spark = []
         try:
             t = yf.Ticker(ticker)
-            hist = t.history(period="1mo")
+            hist = t.history(period="2mo")
             if not hist.empty:
                 cmp = round(float(hist["Close"].iloc[-1]), 2)
                 prev_close = round(float(hist["Close"].iloc[-2]), 2) if len(hist) > 1 else cmp
@@ -107,6 +114,7 @@ def fetch_prices(holdings):
                 if avg_volume:
                     vol_ratio = round(volume / avg_volume, 2)
                 spark = hist["Close"].tail(15).tolist()
+                price_series[ticker] = hist["Close"].tail(30)
 
             hist_long = t.history(period="4mo")
             if len(hist_long) >= 50:
@@ -144,7 +152,17 @@ def fetch_prices(holdings):
             "Vol Ratio": vol_ratio,
             "Spark": spark,
         })
-    return pd.DataFrame(rows)
+
+    # Build the portfolio value history: sum(shares_i * close_i(t)) over dates all tickers share
+    shares_map = {tkr: sh for tkr, sh, _ in holdings}
+    portfolio_value_series = None
+    if price_series:
+        combined = pd.DataFrame(price_series).dropna()  # inner-join on shared trading dates
+        if not combined.empty:
+            weighted = combined.mul(pd.Series(shares_map), axis=1)
+            portfolio_value_series = weighted.sum(axis=1)
+
+    return pd.DataFrame(rows), portfolio_value_series
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +182,35 @@ with c2:
     if st.button("🔄 Refresh", use_container_width=True):
         fetch_prices.clear()
 
-df = fetch_prices(HOLDINGS)
+df, portfolio_value_series = fetch_prices(HOLDINGS)
+
+# ---------------------------------------------------------------------------
+# Portfolio value history
+# ---------------------------------------------------------------------------
+if portfolio_value_series is not None and len(portfolio_value_series) > 1:
+    pv_start = portfolio_value_series.iloc[0]
+    pv_end = portfolio_value_series.iloc[-1]
+    pv_pct = (pv_end - pv_start) / pv_start * 100 if pv_start else 0
+    pv_color = GREEN if pv_pct >= 0 else RED
+
+    fig_pv = go.Figure(go.Scatter(
+        x=portfolio_value_series.index, y=portfolio_value_series.values,
+        mode="lines", line=dict(color=pv_color, width=2),
+        fill="tozeroy", fillcolor=pv_color + "22",
+    ))
+    fig_pv.update_layout(
+        height=100, margin=dict(l=0, r=0, t=0, b=0),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(visible=False), yaxis=dict(visible=False),
+    )
+
+    st.markdown('<div class="card" style="padding-bottom:4px;">', unsafe_allow_html=True)
+    h1, h2 = st.columns([4, 1])
+    h1.markdown(f"<span style='font-size:13px;font-weight:600'>Portfolio value · last {len(portfolio_value_series)} sessions</span>", unsafe_allow_html=True)
+    h2.markdown(f"<div style='text-align:right'><span class='num' style='font-size:12px;font-weight:600;color:{pv_color}'>{pv_pct:+.1f}% over period</span></div>", unsafe_allow_html=True)
+    st.plotly_chart(fig_pv, use_container_width=True, config={"displayModeBar": False})
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.write("")
 
 # ---------------------------------------------------------------------------
 # Summary cards
@@ -192,9 +238,44 @@ st.subheader("Holdings")
 
 df_sorted = df.sort_values("P&L %", ascending=False, na_position="last").reset_index(drop=True)
 df_sorted.insert(0, "Rank", df_sorted.index + 1)
+df_sorted["Allocation %"] = (df_sorted["Value"] / total_current * 100) if total_current else 0
 
 if "selected_symbol" not in st.session_state:
     st.session_state.selected_symbol = df_sorted.iloc[0]["Symbol"]
+if "sort_key" not in st.session_state:
+    st.session_state.sort_key, st.session_state.sort_dir = "Rank", "asc"
+
+SORT_OPTIONS = [("Rank", "Rank"), ("Day %", "Day %"), ("P&L %", "P&L %"), ("Allocation", "Allocation %")]
+
+st.markdown("""
+<style>
+    .st-key-sort_pills div.stButton > button {
+        border-radius: 999px !important; height: 26px; padding: 0 12px !important;
+        font-size: 11.5px !important; font-weight: 600 !important;
+        border: 1px solid #E6DFCF !important; background: #FFFFFF !important;
+        width: auto !important; min-height: 0 !important;
+    }
+    .st-key-sort_pills div.stButton > button:hover { background: #EFE7D8 !important; }
+</style>
+""", unsafe_allow_html=True)
+
+with st.container(key="sort_pills"):
+    sp_cols = st.columns([0.5] + [0.7] * len(SORT_OPTIONS) + [4])
+    sp_cols[0].markdown(f"<span style='font-size:11px;font-weight:600;color:{MUTED};text-transform:uppercase'>Sort</span>", unsafe_allow_html=True)
+    for i, (label, col) in enumerate(SORT_OPTIONS):
+        active = st.session_state.sort_key == col
+        arrow = ("↑" if st.session_state.sort_dir == "asc" else "↓") if active else ""
+        if sp_cols[i + 1].button(f"{label} {arrow}".strip(), key=f"sortpill_{col}"):
+            if active:
+                st.session_state.sort_dir = "desc" if st.session_state.sort_dir == "asc" else "asc"
+            else:
+                st.session_state.sort_key, st.session_state.sort_dir = col, "asc" if col == "Rank" else "desc"
+
+df_sorted = df_sorted.sort_values(
+    st.session_state.sort_key,
+    ascending=(st.session_state.sort_dir == "asc"),
+    na_position="last",
+).reset_index(drop=True)
 
 col_table, col_detail = st.columns([2, 1], gap="medium")
 
@@ -204,26 +285,25 @@ with col_table:
     for h, label in zip(hdr, ["RANK", "STOCK", "CMP", "DAY %", "P&L %", "TREND"]):
         h.markdown(f"<span style='font-size:11px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
 
-    for _, r in df_sorted.iterrows():
-        pnl_val, day_val = r["P&L %"], r["Day %"]
-        pnl_color = GREEN if pd.notna(pnl_val) and pnl_val >= 0 else RED
-        day_color = GREEN if pd.notna(day_val) and day_val >= 0 else RED
-        pnl_disp = f"{pnl_val:+.1f}%" if pd.notna(pnl_val) else "—"
-        day_disp = f"{day_val:+.1f}%" if pd.notna(day_val) else "—"
-        cmp_disp = f"₹{r['CMP']:.0f}" if pd.notna(r["CMP"]) else "—"
-        dot = GREEN if r["EMA Cross Bearish"] is False else (RED if r["EMA Cross Bearish"] is True else MUTED)
-        is_sel = r["Symbol"] == st.session_state.selected_symbol
-        row_bg = f"background:{BG};" if is_sel else ""
+    with st.container(key="holdings_rows"):
+        for _, r in df_sorted.iterrows():
+            pnl_val, day_val = r["P&L %"], r["Day %"]
+            pnl_color = GREEN if pd.notna(pnl_val) and pnl_val >= 0 else RED
+            day_color = GREEN if pd.notna(day_val) and day_val >= 0 else RED
+            pnl_disp = f"{pnl_val:+.1f}%" if pd.notna(pnl_val) else "—"
+            day_disp = f"{day_val:+.1f}%" if pd.notna(day_val) else "—"
+            cmp_disp = f"₹{r['CMP']:.0f}" if pd.notna(r["CMP"]) else "—"
+            dot = GREEN if r["EMA Cross Bearish"] is False else (RED if r["EMA Cross Bearish"] is True else MUTED)
 
-        c1, c2, c3, c4, c5, c6 = st.columns([0.5, 2, 1.3, 1.2, 1.2, 0.6])
-        c1.markdown(f"<div class='num' style='padding-top:10px;color:{MUTED};font-size:12px'>{r['Rank']}</div>", unsafe_allow_html=True)
-        with c2:
-            if st.button(r["Symbol"], key=f"btn_{r['Symbol']}", use_container_width=True):
-                st.session_state.selected_symbol = r["Symbol"]
-        c3.markdown(f"<div class='num' style='padding-top:10px'>{cmp_disp}</div>", unsafe_allow_html=True)
-        c4.markdown(f"<div class='num' style='padding-top:10px;color:{day_color};font-weight:600'>{day_disp}</div>", unsafe_allow_html=True)
-        c5.markdown(f"<div class='num' style='padding-top:10px;color:{pnl_color};font-weight:600'>{pnl_disp}</div>", unsafe_allow_html=True)
-        c6.markdown(f"<div style='padding-top:12px'><span style='width:9px;height:9px;border-radius:50%;background:{dot};display:inline-block'></span></div>", unsafe_allow_html=True)
+            c1, c2, c3, c4, c5, c6 = st.columns([0.5, 2, 1.3, 1.2, 1.2, 0.6])
+            c1.markdown(f"<div class='num' style='padding-top:4px;color:{MUTED};font-size:12px'>{r['Rank']}</div>", unsafe_allow_html=True)
+            with c2:
+                if st.button(r["Symbol"], key=f"btn_{r['Symbol']}", use_container_width=True):
+                    st.session_state.selected_symbol = r["Symbol"]
+            c3.markdown(f"<div class='num' style='padding-top:4px'>{cmp_disp}</div>", unsafe_allow_html=True)
+            c4.markdown(f"<div class='num' style='padding-top:4px;color:{day_color};font-weight:600'>{day_disp}</div>", unsafe_allow_html=True)
+            c5.markdown(f"<div class='num' style='padding-top:4px;color:{pnl_color};font-weight:600'>{pnl_disp}</div>", unsafe_allow_html=True)
+            c6.markdown(f"<div style='padding-top:6px'><span style='width:9px;height:9px;border-radius:50%;background:{dot};display:inline-block'></span></div>", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 row = df_sorted[df_sorted["Symbol"] == st.session_state.selected_symbol].iloc[0]
