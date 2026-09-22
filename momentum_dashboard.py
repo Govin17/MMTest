@@ -165,10 +165,16 @@ st.markdown(f"""
         font-weight: 700 !important; font-size: 15px !important; min-height: 2.6rem !important;
         border-radius: 8px !important; width: 100% !important; text-align: center !important;
     }}
-    [class*="st-key-wl_buy_"] button, [class*="st-key-wl_sell_"] button {{
+    [class*="st-key-wl_buytrig_"] button, [class*="st-key-wl_selltrig_"] button {{
         min-height: 34px !important; height: 34px !important; width: 34px !important;
         padding: 0 !important; border-radius: 50% !important; font-size: 13px !important;
         margin-top: 6px;
+    }}
+    [class*="st-key-wl_buytrig_"] button {{
+        background: {GREEN} !important; color: #FFFFFF !important; border: 1px solid {GREEN} !important;
+    }}
+    [class*="st-key-wl_selltrig_"] button {{
+        background: {RED} !important; color: #FFFFFF !important; border: 1px solid {RED} !important;
     }}
     [class*="st-key-wl_remove_"] button {{
         background: transparent !important; border: 1px solid {BORDER} !important; color: {MUTED} !important;
@@ -967,27 +973,43 @@ def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, 
             rc5.markdown(f"<div class='num' style='padding-top:12px;font-size:14px;color:{MUTED}'>{vol_str}</div>", unsafe_allow_html=True)
 
             with rc6:
-                buy_click = st.button("B", key=f"wl_buy_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None)
+                with st.container(key=f"wl_buytrig_{active_name}_{sym}"):
+                    with st.popover("B", use_container_width=True):
+                        st.markdown(f"<div style='font-weight:600;margin-bottom:6px'>Buy {sym}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='num' style='font-size:13px;color:{MUTED};margin-bottom:8px'>Live CMP: {cmp_str}</div>", unsafe_allow_html=True)
+                        if trade_portfolio is None:
+                            st.caption("No paper portfolio exists yet — create one in the Paper Trading tab.")
+                        buy_qty = st.number_input("Qty", min_value=1, value=1, step=1, key=f"wl_buyqty_{active_name}_{sym}")
+                        buy_click = st.button("🟢 Confirm Buy", key=f"wl_buy_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None)
             with rc7:
-                sell_click = st.button("S", key=f"wl_sell_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None or held_qty < 1)
+                with st.container(key=f"wl_selltrig_{active_name}_{sym}"):
+                    with st.popover("S", use_container_width=True):
+                        st.markdown(f"<div style='font-weight:600;margin-bottom:6px'>Sell {sym}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='num' style='font-size:13px;color:{MUTED};margin-bottom:8px'>Live CMP: {cmp_str} · Held: {held_qty}</div>", unsafe_allow_html=True)
+                        if trade_portfolio is None:
+                            st.caption("No paper portfolio exists yet — create one in the Paper Trading tab.")
+                        elif held_qty < 1:
+                            st.caption("You don't hold any shares of this stock in the linked portfolio.")
+                        sell_qty = st.number_input("Qty", min_value=1, max_value=max(held_qty, 1), value=1, step=1, key=f"wl_sellqty_{active_name}_{sym}")
+                        sell_click = st.button("🔴 Confirm Sell", key=f"wl_sell_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None or held_qty < 1)
             with rc8:
                 remove_click = st.button("✕", key=f"wl_remove_{active_name}_{sym}", use_container_width=True, help=f"Remove {sym} from this watchlist")
 
             if buy_click:
                 if cmp is None:
                     st.error(f"No live price for {sym} — can't trade.")
-                elif cmp > cash:
-                    st.error(f"Not enough paper cash (₹{cash:,.0f}) to buy {sym} @ ₹{cmp:.2f}.")
+                elif buy_qty * cmp > cash:
+                    st.error(f"Not enough paper cash (₹{cash:,.0f}) to buy {buy_qty} {sym} @ ₹{cmp:.2f}.")
                 else:
-                    save_paper_trade(trade_portfolio, sym, "BUY", 1, cmp)
-                    st.success(f"Paper-bought 1 {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
+                    save_paper_trade(trade_portfolio, sym, "BUY", buy_qty, cmp)
+                    st.success(f"Paper-bought {buy_qty} {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
                     st.rerun()
             if sell_click:
                 if cmp is None:
                     st.error(f"No live price for {sym} — can't trade.")
                 else:
-                    save_paper_trade(trade_portfolio, sym, "SELL", 1, cmp)
-                    st.success(f"Paper-sold 1 {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
+                    save_paper_trade(trade_portfolio, sym, "SELL", sell_qty, cmp)
+                    st.success(f"Paper-sold {sell_qty} {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
                     st.rerun()
             if remove_click:
                 active_wl["stocks"] = [s for s in stocks if s["Symbol"] != sym]
