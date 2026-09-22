@@ -165,32 +165,53 @@ overview = pd.DataFrame({
 })
 
 
-def highlight_pnl(val):
-    if pd.isna(val):
-        return ""
-    return "color:#4ade80; font-weight:600" if val >= 0 else "color:#ff6b6b; font-weight:600"
+if "selected_symbol" not in st.session_state:
+    st.session_state.selected_symbol = df_sorted.iloc[0]["Symbol"]
 
-
-styled_overview = overview.style.format({"CMP": "₹{:.0f}", "P&L %": "{:+.1f}%"}).map(
-    highlight_pnl, subset=["P&L %"]
-)
+st.markdown("""
+<style>
+    div[data-testid="stVerticalBlock"] div.stButton > button {
+        background: transparent; border: none; box-shadow: none;
+        text-align: left; padding: 6px 8px; width: 100%;
+        border-bottom: 1px solid #2d2f39; border-radius: 0;
+        font-weight: 400;
+    }
+    div[data-testid="stVerticalBlock"] div.stButton > button:hover {
+        background: #1a1c23; color: #fff;
+    }
+    div[data-testid="stVerticalBlock"] div.stButton > button:focus:not(:active) {
+        color: inherit;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 col_table, col_detail = st.columns([3, 2])
 
 with col_table:
-    event = st.dataframe(
-        styled_overview,
-        use_container_width=True,
-        hide_index=True,
-        height=35 * len(overview) + 38,
-        on_select="rerun",
-        selection_mode="single-row",
-        key="holdings_table",
-    )
+    hdr1, hdr2, hdr3, hdr4 = st.columns([2, 1.3, 2, 0.7])
+    hdr1.caption("STOCK")
+    hdr2.caption("CMP")
+    hdr3.caption("P&L")
+    hdr4.caption("")
+    for _, r in df_sorted.iterrows():
+        pnl_val = r["P&L %"]
+        pnl_color = "#4ade80" if pd.notna(pnl_val) and pnl_val >= 0 else "#ff6b6b"
+        pnl_disp = f"{pnl_val:+.1f}%" if pd.notna(pnl_val) else "—"
+        cmp_disp = f"₹{r['CMP']:.0f}" if pd.notna(r["CMP"]) else "—"
+        trend_dot = "🔴" if r["EMA Cross Bearish"] is True else ("🟢" if r["EMA Cross Bearish"] is False else "⚪")
 
-selected_rows = event.selection.rows if event and event.selection else []
-sel_idx = selected_rows[0] if selected_rows else 0
-row = df_sorted.iloc[sel_idx]
+        c1, c2, c3, c4 = st.columns([2, 1.3, 2, 0.7])
+        with c1:
+            if st.button(r["Symbol"], key=f"btn_{r['Symbol']}", use_container_width=True):
+                st.session_state.selected_symbol = r["Symbol"]
+        c2.markdown(f"<div style='padding-top:8px'>{cmp_disp}</div>", unsafe_allow_html=True)
+        c3.markdown(
+            f"<div style='padding-top:8px;color:{pnl_color};font-weight:600'>{pnl_disp}</div>",
+            unsafe_allow_html=True,
+        )
+        c4.markdown(f"<div style='padding-top:8px'>{trend_dot}</div>", unsafe_allow_html=True)
+
+row = df_sorted[df_sorted["Symbol"] == st.session_state.selected_symbol].iloc[0]
 
 value_str = f"₹{row['Value']:,.0f}" if pd.notna(row["Value"]) else "—"
 day_str = f"{row['Day %']:+.2f}%" if pd.notna(row["Day %"]) else "—"
