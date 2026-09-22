@@ -62,7 +62,7 @@ st.markdown(f"""
     div.stButton {{ margin: 0; }}
 
     .st-key-holdings_rows div[data-testid="stHorizontalBlock"] {{
-        gap: 8px; margin-bottom: -14px;
+        gap: 8px; margin-bottom: 0px;
     }}
     .st-key-holdings_rows [data-testid="column"] {{ padding-top: 0; padding-bottom: 0; }}
 
@@ -281,8 +281,8 @@ col_table, col_detail = st.columns([2, 1], gap="medium")
 
 with col_table:
     st.markdown('<div class="card" style="padding:0;overflow:hidden;">', unsafe_allow_html=True)
-    hdr = st.columns([0.5, 2, 1.3, 1.2, 1.2, 0.6])
-    for h, label in zip(hdr, ["RANK", "STOCK", "CMP", "DAY %", "P&L %", "TREND"]):
+    hdr = st.columns([0.5, 2, 1.3, 1.3, 1.2, 1.2, 0.6])
+    for h, label in zip(hdr, ["RANK", "STOCK", "CMP", "EXPOSURE", "DAY %", "P&L %", "TREND"]):
         h.markdown(f"<span style='font-size:11px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
 
     with st.container(key="holdings_rows"):
@@ -293,17 +293,24 @@ with col_table:
             pnl_disp = f"{pnl_val:+.1f}%" if pd.notna(pnl_val) else "—"
             day_disp = f"{day_val:+.1f}%" if pd.notna(day_val) else "—"
             cmp_disp = f"₹{r['CMP']:.0f}" if pd.notna(r["CMP"]) else "—"
+            exposure_disp = f"₹{r['Value']:,.0f}" if pd.notna(r["Value"]) else "—"
             dot = GREEN if r["EMA Cross Bearish"] is False else (RED if r["EMA Cross Bearish"] is True else MUTED)
 
-            c1, c2, c3, c4, c5, c6 = st.columns([0.5, 2, 1.3, 1.2, 1.2, 0.6])
-            c1.markdown(f"<div class='num' style='padding-top:4px;color:{MUTED};font-size:12px'>{r['Rank']}</div>", unsafe_allow_html=True)
+            c1, c2, c3, c4, c5, c6, c7 = st.columns([0.5, 2, 1.3, 1.3, 1.2, 1.2, 0.6])
+            c1.markdown(f"<div class='num' style='padding-top:8px;color:{MUTED};font-size:12px'>{r['Rank']}</div>", unsafe_allow_html=True)
             with c2:
                 if st.button(r["Symbol"], key=f"btn_{r['Symbol']}", use_container_width=True):
                     st.session_state.selected_symbol = r["Symbol"]
-            c3.markdown(f"<div class='num' style='padding-top:4px'>{cmp_disp}</div>", unsafe_allow_html=True)
-            c4.markdown(f"<div class='num' style='padding-top:4px;color:{day_color};font-weight:600'>{day_disp}</div>", unsafe_allow_html=True)
-            c5.markdown(f"<div class='num' style='padding-top:4px;color:{pnl_color};font-weight:600'>{pnl_disp}</div>", unsafe_allow_html=True)
-            c6.markdown(f"<div style='padding-top:6px'><span style='width:9px;height:9px;border-radius:50%;background:{dot};display:inline-block'></span></div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div class='num' style='font-size:11px;color:{MUTED};margin-top:-14px;padding:0 8px 4px'>"
+                    f"{r['Shares']} sh · avg ₹{r['Avg Price']:.2f}</div>",
+                    unsafe_allow_html=True,
+                )
+            c3.markdown(f"<div class='num' style='padding-top:8px'>{cmp_disp}</div>", unsafe_allow_html=True)
+            c4.markdown(f"<div class='num' style='padding-top:8px'>{exposure_disp}</div>", unsafe_allow_html=True)
+            c5.markdown(f"<div class='num' style='padding-top:8px;color:{day_color};font-weight:600'>{day_disp}</div>", unsafe_allow_html=True)
+            c6.markdown(f"<div class='num' style='padding-top:8px;color:{pnl_color};font-weight:600'>{pnl_disp}</div>", unsafe_allow_html=True)
+            c7.markdown(f"<div style='padding-top:10px'><span style='width:9px;height:9px;border-radius:50%;background:{dot};display:inline-block'></span></div>", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 row = df_sorted[df_sorted["Symbol"] == st.session_state.selected_symbol].iloc[0]
