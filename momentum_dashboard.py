@@ -23,19 +23,19 @@ from datetime import datetime
 
 st.set_page_config(page_title="Momentum Tracker", page_icon="📈", layout="wide")
 
-GREEN = "#2E7D4F"
-RED = "#B23A2E"
-ACCENT = "#A9713F"
-BG = "#F6F2E9"
-CARD = "#FFFFFF"
-CARD_ALT = "#FBF7EE"      # detail / summary cards — a hair warmer than white
-CARD_TABLE = "#EFE6D3"    # holdings / positions tables — darker beige
-CARD_UPLOAD = "#F5EFE0"   # watchlist / paper-trade utility cards
-BORDER = "#E6DFCF"
-INK = "#211C15"
-MUTED = "#8A8171"
-PALETTE = ["#A9713F", "#7A8B5E", "#5B7A99", "#B3703F", "#8B6B9C", "#6E9385",
-           "#C08A4F", "#5E7FA6", "#9C7A5E", "#7A9C6E", "#A65E7A", "#6E8B9C"]
+GREEN = "#2ECC71"
+RED = "#FF6B4A"
+ACCENT = "#7C8CFF"
+BG = "#0E0E10"
+CARD = "#18181B"
+CARD_ALT = "#1D1D21"      # detail / summary cards — one shade up from base
+CARD_TABLE = "#1A1A1E"    # holdings / positions tables
+CARD_UPLOAD = "#1D1D21"   # watchlist / paper-trade utility cards
+BORDER = "#2A2A2E"
+INK = "#F2F2F3"
+MUTED = "#8E8E93"
+PALETTE = ["#7C8CFF", "#7A8B5E", "#5B9BD5", "#E8590C", "#AE3EC9", "#2ECC71",
+           "#F08C00", "#5E7FA6", "#D6336C", "#1098AD", "#A65E7A", "#6E8B9C"]
 
 WATCHLISTS_FILE = "watchlists.json"
 PORTFOLIOS_FILE = "portfolios.json"
@@ -76,7 +76,7 @@ st.markdown(f"""
     .stSelectbox div[role="listbox"],
     [data-testid="stFileUploaderDropzone"],
     [data-testid="stFileUploaderDropzoneInstructions"] {{
-        background-color: #FFFFFF !important;
+        background-color: {CARD} !important;
         color: {INK} !important;
         border-color: {BORDER} !important;
     }}
@@ -98,10 +98,10 @@ st.markdown(f"""
     div[data-testid="stVerticalBlock"] div.stButton > button {{
         background: transparent; border: none; box-shadow: none;
         text-align: left; padding: 5px 8px; width: 100%;
-        border-bottom: 1px solid #F1ECE0; border-radius: 0;
+        border-bottom: 1px solid {BORDER}; border-radius: 0;
         font-weight: 600; color: {INK}; min-height: 0; font-size: 14px;
     }}
-    div[data-testid="stVerticalBlock"] div.stButton > button:hover {{ background: {BG}; }}
+    div[data-testid="stVerticalBlock"] div.stButton > button:hover {{ background: {CARD_ALT}; }}
     div[data-testid="stVerticalBlock"] div.stButton > button:focus:not(:active) {{ color: {INK}; }}
     div.stButton {{ margin: 0; }}
 
@@ -113,11 +113,11 @@ st.markdown(f"""
     .st-key-pv_timeframe div.stButton > button {{
         border-radius: 999px !important; height: 27px; padding: 0 13px !important;
         font-size: 12.5px !important; font-weight: 600 !important;
-        border: 1px solid #E6DFCF !important; background: #FFFFFF !important;
-        width: auto !important; min-height: 0 !important;
+        border: 1px solid {BORDER} !important; background: {CARD} !important;
+        width: auto !important; min-height: 0 !important; color: {INK} !important;
     }}
     .st-key-sort_pills div.stButton > button:hover,
-    .st-key-pv_timeframe div.stButton > button:hover {{ background: #EFE7D8 !important; }}
+    .st-key-pv_timeframe div.stButton > button:hover {{ background: {CARD_ALT} !important; }}
     .st-key-sort_pills div[data-testid="stHorizontalBlock"] {{ gap: 6px !important; }}
 
     .card {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px; padding: 20px 22px; margin-bottom: 6px; }}
@@ -127,7 +127,7 @@ st.markdown(f"""
         background: {CARD}; border: 1px solid {BORDER}; border-radius: 8px;
         padding: 12px 16px; font-size: 0.86rem; color: {MUTED}; margin-top: 0.5rem;
     }}
-    .track-wrap {{ position: relative; height: 4px; background: #F1ECE0; border-radius: 2px; margin: 30px 10px 6px; }}
+    .track-wrap {{ position: relative; height: 4px; background: {BORDER}; border-radius: 2px; margin: 30px 10px 6px; }}
     .track-dot {{ position: absolute; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 4px; }}
     .track-dot .dot {{ width: 10px; height: 10px; border-radius: 50%; border: 2px solid #FFF; display: block; }}
     .track-dot .lbl {{ font-size: 10.5px; color: {MUTED}; white-space: nowrap; margin-top: 10px; }}
@@ -145,7 +145,7 @@ st.markdown(f"""
     div[data-testid="stVerticalBlock"] div.stButton > button {{
         background: transparent; border: none; box-shadow: none;
         text-align: left; padding: 5px 8px; width: 100%;
-        border-bottom: 1px solid #F1ECE0; border-radius: 0;
+        border-bottom: 1px solid {BORDER}; border-radius: 0;
         font-weight: 600; color: {INK}; min-height: 0; font-size: 15px;
     }}
     div[data-testid="stVerticalBlock"] div.stButton > button:hover {{ background: {BG}; }}
@@ -162,6 +162,17 @@ st.markdown(f"""
         background: {RED} !important; color: #FFFFFF !important; border: 1px solid {RED} !important;
         font-weight: 700 !important; font-size: 15px !important; min-height: 2.6rem !important;
         border-radius: 8px !important; width: 100% !important; text-align: center !important;
+    }}
+    [class*="st-key-wl_buy_"] button, [class*="st-key-wl_sell_"] button {{
+        min-height: 34px !important; height: 34px !important; width: 34px !important;
+        padding: 0 !important; border-radius: 50% !important; font-size: 13px !important;
+        margin-top: 6px;
+    }}
+    [class*="st-key-wl_remove_"] button {{
+        background: transparent !important; border: 1px solid {BORDER} !important; color: {MUTED} !important;
+        min-height: 34px !important; height: 34px !important; width: 34px !important;
+        padding: 0 !important; border-radius: 50% !important; font-size: 13px !important;
+        margin-top: 6px; text-align: center !important;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -264,6 +275,62 @@ def fetch_watchlist_prices(symbols):
         except Exception:
             out[sym] = None
     return out
+
+
+@st.cache_data(ttl=300)
+def fetch_watchlist_detail(symbols):
+    """Richer per-symbol data for the watchlist table: cmp, day change, volume, sparkline."""
+    out = {}
+    for sym in symbols:
+        cmp, prev_close, volume, spark = None, None, None, []
+        try:
+            t = yf.Ticker(sym + ".NS")
+            hist = t.history(period="1mo")
+            if not hist.empty:
+                cmp = round(float(hist["Close"].iloc[-1]), 2)
+                prev_close = round(float(hist["Close"].iloc[-2]), 2) if len(hist) > 1 else cmp
+                volume = int(hist["Volume"].iloc[-1]) if "Volume" in hist else None
+                spark = hist["Close"].tail(15).tolist()
+        except Exception:
+            pass
+        day_abs = (cmp - prev_close) if (cmp is not None and prev_close) else None
+        day_pct = (day_abs / prev_close * 100) if (day_abs is not None and prev_close) else None
+        out[sym] = {"cmp": cmp, "day_abs": day_abs, "day_pct": day_pct, "volume": volume, "spark": spark}
+    return out
+
+
+def sparkline_svg(values, color, width=90, height=28):
+    if not values or len(values) < 2:
+        return f"<svg width='{width}' height='{height}'></svg>"
+    vmin, vmax = min(values), max(values)
+    vrange = (vmax - vmin) or 1
+    n = len(values)
+    pts = []
+    for i, v in enumerate(values):
+        x = (i / (n - 1)) * width
+        y = height - ((v - vmin) / vrange) * (height - 4) - 2
+        pts.append(f"{x:.1f},{y:.1f}")
+    baseline_y = height - ((values[0] - vmin) / vrange) * (height - 4) - 2
+    return (
+        f"<svg width='{width}' height='{height}' style='display:block'>"
+        f"<line x1='0' y1='{baseline_y:.1f}' x2='{width}' y2='{baseline_y:.1f}' "
+        f"stroke='#3A3A40' stroke-width='1' stroke-dasharray='2,2'/>"
+        f"<polyline points='{' '.join(pts)}' fill='none' stroke='{color}' stroke-width='1.6'/>"
+        f"</svg>"
+    )
+
+
+AVATAR_COLORS = ["#4C6EF5", "#E8590C", "#2F9E44", "#AE3EC9", "#1098AD", "#F08C00", "#D6336C", "#5F3DC4"]
+
+
+def avatar_html(symbol, size=34):
+    letter = symbol[0].upper()
+    color = AVATAR_COLORS[sum(ord(c) for c in symbol) % len(AVATAR_COLORS)]
+    return (
+        f"<div style='width:{size}px;height:{size}px;border-radius:50%;background:{color};"
+        f"display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;"
+        f"font-size:{size*0.42:.0f}px;flex-shrink:0'>{letter}</div>"
+    )
 
 
 @st.cache_data(ttl=300)
@@ -491,7 +558,7 @@ def render_holdings_tab():
         st.session_state.sort_key, st.session_state.sort_dir = "Rank", "asc"
 
     SORT_OPTIONS = [("Rank", "Rank"), ("Day %", "Day %"), ("P&L %", "P&L %"), ("Allocation", "Allocation %")]
-    COL_WIDTHS = [0.35, 2.1, 0.75, 0.95, 0.65, 0.65, 0.45, 1.6]
+    COL_WIDTHS = [2.6, 1.0, 1.25, 1.05, 1.3, 0.6]
 
     df_sorted = df_sorted.sort_values(
         st.session_state.sort_key,
@@ -518,7 +585,7 @@ def render_holdings_tab():
 
         with st.container(key="holdings_hdr"):
             hdr = st.columns(COL_WIDTHS)
-            for h, label in zip(hdr, ["RANK", "STOCK", "CMP", "EXPOSURE", "DAY %", "P&L %", "TREND"]):
+            for h, label in zip(hdr, ["COMPANY", "TREND", "MARKET PRICE (1D%)", "RETURNS %", "CURRENT (INVESTED)"]):
                 h.markdown(f"<span style='font-size:12px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
 
         with st.container(key="holdings_rows"):
@@ -527,26 +594,45 @@ def render_holdings_tab():
                 pnl_color = GREEN if pd.notna(pnl_val) and pnl_val >= 0 else RED
                 day_color = GREEN if pd.notna(day_val) and day_val >= 0 else RED
                 pnl_disp = f"{pnl_val:+.1f}%" if pd.notna(pnl_val) else "—"
-                day_disp = f"{day_val:+.1f}%" if pd.notna(day_val) else "—"
-                cmp_disp = f"₹{r['CMP']:.0f}" if pd.notna(r["CMP"]) else "—"
-                exposure_disp = f"₹{r['Value']:,.0f}" if pd.notna(r["Value"]) else "—"
-                dot = GREEN if r["EMA Cross Bearish"] is False else (RED if r["EMA Cross Bearish"] is True else MUTED)
+                cmp_val = r["CMP"] if pd.notna(r["CMP"]) else None
+                prev_close = (cmp_val / (1 + day_val / 100)) if (cmp_val is not None and pd.notna(day_val)) else None
+                day_abs = (cmp_val - prev_close) if (cmp_val is not None and prev_close is not None) else None
+                cmp_disp = f"₹{cmp_val:,.2f}" if cmp_val is not None else "—"
+                day_line = (f"{day_abs:+,.2f} ({day_val:+.2f}%)" if day_abs is not None else "—")
+                pnl_rupee = r["P&L ₹"] if pd.notna(r["P&L ₹"]) else None
+                value_disp = f"₹{r['Value']:,.2f}" if pd.notna(r["Value"]) else "—"
+                invested_disp = f"₹{r['Invested']:,.2f}" if pd.notna(r["Invested"]) else "—"
+                spark = r.get("Spark") or []
+                spark_color = GREEN if (spark and spark[-1] >= spark[0]) else RED
 
-                c1, c2, c3, c4, c5, c6, c7, _sp = st.columns(COL_WIDTHS)
-                c1.markdown(f"<div class='num' style='padding-top:8px;color:{MUTED};font-size:14px'>{r['Rank']}</div>", unsafe_allow_html=True)
-                with c2:
-                    if st.button(r["Symbol"], key=f"btn_{r['Symbol']}", use_container_width=True):
-                        st.session_state.selected_symbol = r["Symbol"]
-                    st.markdown(
-                        f"<div class='num' style='font-size:13px;color:{MUTED};margin-top:-14px;padding:0 8px 4px'>"
-                        f"{r['Shares']} sh · avg ₹{r['Avg Price']:.2f}</div>",
-                        unsafe_allow_html=True,
-                    )
-                c3.markdown(f"<div class='num' style='padding-top:8px;font-size:15px;font-weight:600'>{cmp_disp}</div>", unsafe_allow_html=True)
-                c4.markdown(f"<div class='num' style='padding-top:8px;font-size:15px'>{exposure_disp}</div>", unsafe_allow_html=True)
-                c5.markdown(f"<div class='num' style='padding-top:8px;color:{day_color};font-weight:600;font-size:15px'>{day_disp}</div>", unsafe_allow_html=True)
-                c6.markdown(f"<div class='num' style='padding-top:8px;color:{pnl_color};font-weight:600;font-size:15px'>{pnl_disp}</div>", unsafe_allow_html=True)
-                c7.markdown(f"<div style='padding-top:10px'><span style='width:9px;height:9px;border-radius:50%;background:{dot};display:inline-block'></span></div>", unsafe_allow_html=True)
+                c1, c2, c3, c4, c5, _sp = st.columns(COL_WIDTHS)
+                with c1:
+                    ac1, ac2 = st.columns([0.5, 3])
+                    ac1.markdown(avatar_html(r["Symbol"]), unsafe_allow_html=True)
+                    with ac2:
+                        if st.button(r["Symbol"], key=f"btn_{r['Symbol']}", use_container_width=True):
+                            st.session_state.selected_symbol = r["Symbol"]
+                        st.markdown(
+                            f"<div class='num' style='font-size:13px;color:{MUTED};margin-top:-14px;padding:0 8px 4px'>"
+                            f"{r['Shares']} share{'s' if r['Shares'] != 1 else ''} · avg ₹{r['Avg Price']:.2f}</div>",
+                            unsafe_allow_html=True,
+                        )
+                c2.markdown(f"<div style='padding-top:6px'>{sparkline_svg(spark, spark_color)}</div>", unsafe_allow_html=True)
+                c3.markdown(
+                    f"<div class='num' style='padding-top:8px;font-size:15px;font-weight:600'>{cmp_disp}</div>"
+                    f"<div class='num' style='font-size:13px;color:{day_color}'>{day_line}</div>",
+                    unsafe_allow_html=True,
+                )
+                c4.markdown(
+                    f"<div class='num' style='padding-top:8px;color:{pnl_color};font-weight:600;font-size:15px'>{pnl_disp}</div>"
+                    + (f"<div class='num' style='font-size:13px;color:{pnl_color}'>{pnl_rupee:+,.2f}</div>" if pnl_rupee is not None else ""),
+                    unsafe_allow_html=True,
+                )
+                c5.markdown(
+                    f"<div class='num' style='padding-top:8px;font-size:15px'>{value_disp}</div>"
+                    f"<div class='num' style='font-size:13px;color:{MUTED}'>{invested_disp}</div>",
+                    unsafe_allow_html=True,
+                )
         st.markdown('</div>', unsafe_allow_html=True)
 
     row = df_sorted[df_sorted["Symbol"] == st.session_state.selected_symbol].iloc[0]
@@ -571,7 +657,7 @@ def render_holdings_tab():
             <span class="num" style="font-size:26px;font-weight:600">₹{row['CMP']:.2f}</span>
             <span class="num" style="font-size:14px;font-weight:600;color:{day_color}">{day_str} today</span>
           </div>
-          <div style="height:1px;background:#EFE9DA;margin:14px 0"></div>
+          <div style="height:1px;background:{BORDER};margin:14px 0"></div>
         """
         st.markdown(detail, unsafe_allow_html=True)
 
@@ -596,7 +682,7 @@ def render_holdings_tab():
             st.markdown(f"<div style='font-size:13px;color:{MUTED}'>Avg. price vs CMP vs EMAs</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='track-wrap'>{dots}</div>", unsafe_allow_html=True)
             st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-            st.markdown("<div style='height:1px;background:#EFE9DA;margin:8px 0'></div>", unsafe_allow_html=True)
+            st.markdown("<div style='height:1px;background:{BORDER};margin:8px 0'></div>", unsafe_allow_html=True)
 
         grid_items = [
             ("Unrealized P&L", f"<span style='color:{pnl_color}'>{pnl_str}</span> (₹{row['P&L ₹']:+,.0f})" if pd.notna(row["P&L %"]) else "—"),
@@ -804,7 +890,7 @@ def render_watchlist_tab():
         return
 
     wl_symbols = [s["Symbol"] for s in stocks]
-    wl_prices = fetch_watchlist_prices(tuple(wl_symbols))
+    wl_detail = fetch_watchlist_detail(tuple(wl_symbols))
 
     linked_portfolio = active_wl.get("linked_portfolio")
     trade_portfolio = linked_portfolio if linked_portfolio in portfolio_names else (portfolio_names[0] if portfolio_names else None)
@@ -820,35 +906,46 @@ def render_watchlist_tab():
     else:
         st.caption("No paper portfolio exists yet — create one in the Paper Trading tab to enable Buy/Sell here.")
 
-    wl_cols = st.columns(3)
-    for i, wrow in enumerate(stocks):
+    st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
+    WL_COL_WIDTHS = [2.4, 1.0, 1.15, 1.15, 1.0, 0.55, 0.55, 0.35]
+    hdr = st.columns(WL_COL_WIDTHS)
+    for h, label in zip(hdr, ["COMPANY", "TREND", "MKT PRICE", "1D CHANGE", "1D VOL", "", "", ""]):
+        h.markdown(f"<span style='font-size:12px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
+
+    for wrow in stocks:
         sym = wrow["Symbol"]
         in_book = sym in holding_symbols
-        cmp = wl_prices.get(sym)
+        d = wl_detail.get(sym, {})
+        cmp, day_abs, day_pct, volume, spark = d.get("cmp"), d.get("day_abs"), d.get("day_pct"), d.get("volume"), d.get("spark") or []
         cmp_str = f"₹{cmp:,.2f}" if cmp else "—"
+        day_color = GREEN if (day_pct is not None and day_pct >= 0) else RED
+        day_str = f"{day_abs:+,.2f} ({day_pct:+.2f}%)" if day_abs is not None else "—"
+        vol_str = f"{volume:,}" if volume else "—"
         held_qty = positions.get(sym, {"qty": 0})["qty"]
-        badge = f"<span style='font-size:10px;font-weight:600;color:{GREEN};background:#E9F3EC;border-radius:4px;padding:1px 5px;margin-left:6px'>in book</span>" if in_book else ""
-        paper_badge = f"<span style='font-size:10px;font-weight:600;color:{ACCENT};background:#F3EADC;border-radius:4px;padding:1px 5px;margin-left:6px'>paper: {held_qty}</span>" if held_qty else ""
+        badge = f"<span style='font-size:10px;font-weight:600;color:{GREEN};background:#1B3B2A;border-radius:4px;padding:1px 5px;margin-left:6px'>in book</span>" if in_book else ""
+        paper_badge = f"<span style='font-size:10px;font-weight:600;color:{ACCENT};background:#33304D;border-radius:4px;padding:1px 5px;margin-left:6px'>paper: {held_qty}</span>" if held_qty else ""
+        spark_color = GREEN if (spark and spark[-1] >= spark[0]) else RED
 
-        with wl_cols[i % 3]:
-            st.markdown(f"""
-            <div style="border:1px dashed #DED4BC;border-radius:8px;padding:14px 16px 8px;margin-bottom:8px;background:{CARD_ALT}">
-              <div style="display:flex;align-items:baseline;justify-content:space-between">
-                <span style="font-size:15px;font-weight:600">{sym}{badge}{paper_badge}</span>
-                <span class="num" style="font-size:13px;color:{MUTED}">Rank #{wrow['Rank']}</span>
-              </div>
-              <div style="display:flex;align-items:baseline;justify-content:space-between;margin-top:4px">
-                <span class="num" style="font-size:15px">{cmp_str}</span>
-                <span class="num" style="font-size:13px;font-weight:600;color:{ACCENT}">score {wrow['Score']:.2f}</span>
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
+        rc1, rc2, rc3, rc4, rc5, rc6, rc7, rc8 = st.columns(WL_COL_WIDTHS)
+        with rc1:
+            a1, a2 = st.columns([0.5, 3])
+            a1.markdown(avatar_html(sym), unsafe_allow_html=True)
+            with a2:
+                a2.markdown(f"<div style='padding-top:4px;font-weight:600;font-size:15px'>{sym}{badge}{paper_badge}</div>", unsafe_allow_html=True)
+                a2.markdown(f"<div class='num' style='font-size:12.5px;color:{MUTED}'>Rank #{wrow['Rank']} · score {wrow['Score']:.2f}</div>", unsafe_allow_html=True)
+        rc2.markdown(f"<div style='padding-top:10px'>{sparkline_svg(spark, spark_color)}</div>", unsafe_allow_html=True)
+        rc3.markdown(f"<div class='num' style='padding-top:12px;font-size:15px;font-weight:600'>{cmp_str}</div>", unsafe_allow_html=True)
+        rc4.markdown(f"<div class='num' style='padding-top:12px;font-size:14px;color:{day_color};font-weight:600'>{day_str}</div>", unsafe_allow_html=True)
+        rc5.markdown(f"<div class='num' style='padding-top:12px;font-size:14px;color:{MUTED}'>{vol_str}</div>", unsafe_allow_html=True)
 
-            bcol, scol, xcol = st.columns([1, 1, 0.5])
-            buy_click = bcol.button("🟢 Buy 1", key=f"wl_buy_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None)
-            sell_click = scol.button("🔴 Sell 1", key=f"wl_sell_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None or held_qty < 1)
-            remove_click = xcol.button("✕", key=f"wl_remove_{active_name}_{sym}", use_container_width=True, help=f"Remove {sym} from this watchlist")
+        with rc6:
+            buy_click = st.button("B", key=f"wl_buy_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None)
+        with rc7:
+            sell_click = st.button("S", key=f"wl_sell_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None or held_qty < 1)
+        with rc8:
+            remove_click = st.button("✕", key=f"wl_remove_{active_name}_{sym}", use_container_width=True, help=f"Remove {sym} from this watchlist")
 
+        if True:
             if buy_click:
                 if cmp is None:
                     st.error(f"No live price for {sym} — can't trade.")
@@ -870,6 +967,8 @@ def render_watchlist_tab():
                 watchlists[active_name] = active_wl
                 save_watchlists(watchlists)
                 st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # =============================================================================
