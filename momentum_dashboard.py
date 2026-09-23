@@ -251,6 +251,42 @@ HOLDINGS = [
 
 
 @st.cache_data(ttl=5)
+def detect_vcp(hist):
+    """Lightweight heuristic for a Volatility Contraction Pattern (Minervini-style):
+    price still fairly close to its recent high (structurally in an uptrend, not
+    broken down), and the last ~13 weeks split into three windows show both the
+    trading range and the volume progressively contracting/drying up window over
+    window. Not a strict VCP scan — a rough flag to surface candidates worth a
+    closer look, using only what yfinance's daily OHLCV gives us."""
+    try:
+        if hist is None or hist.empty or not {"High", "Low", "Close", "Volume"}.issubset(hist.columns):
+            return False
+        h = hist.tail(90)
+        if len(h) < 30:
+            return False
+        recent_high = hist["High"].tail(130).max()
+        cmp = h["Close"].iloc[-1]
+        if not recent_high or (recent_high - cmp) / recent_high > 0.25:
+            return False
+
+        n = len(h)
+        third = n // 3
+        if third < 5:
+            return False
+        w1, w2, w3 = h.iloc[:third], h.iloc[third:2 * third], h.iloc[2 * third:]
+
+        def range_pct(w):
+            avg = w["Close"].mean()
+            return ((w["High"].max() - w["Low"].min()) / avg * 100) if avg else 999
+
+        r1, r2, r3 = range_pct(w1), range_pct(w2), range_pct(w3)
+        contracting = r1 > r2 > r3 * 1.0  # each window tighter than the last
+        vol_dryup = w3["Volume"].mean() < w1["Volume"].mean()
+        return bool(contracting and vol_dryup)
+    except Exception:
+        return False
+
+
 def fetch_prices(holdings):
     rows = []
     price_series = {}   # ticker -> Series of Close, indexed by date (up to 1y)
@@ -258,6 +294,7 @@ def fetch_prices(holdings):
         cmp, prev_close, ema20, ema50 = None, None, None, None
         volume, avg_volume, vol_ratio = None, None, None
         spark = []
+        vcp = False
         try:
             t = yf.Ticker(ticker)
             hist = t.history(period="1y")
@@ -270,6 +307,7 @@ def fetch_prices(holdings):
                     vol_ratio = round(volume / avg_volume, 2)
                 spark = hist["Close"].tail(15).tolist()
                 price_series[ticker] = hist["Close"]
+                vcp = detect_vcp(hist)
 
             hist_long = t.history(period="4mo")
             if len(hist_long) >= 50:
@@ -306,6 +344,7 @@ def fetch_prices(holdings):
             "Volume": volume,
             "Vol Ratio": vol_ratio,
             "Spark": spark,
+            "VCP": vcp,
         })
 
     # Build the portfolio value history: sum(shares_i * close_i(t)) over dates all tickers share
@@ -452,16 +491,16 @@ def fetch_paper_value_series(trades_records, starting_cash):
 
 @st.cache_data(ttl=5)
 def fetch_technicals(symbols):
-    """EMA20/EMA50 for arbitrary NSE symbols (used by paper portfolios)."""
+    """EMA20/EMA50 + VCP flag for arbitrary NSE symbols (used by watchlists and paper portfolios)."""
     out = {}
     for sym in symbols:
         try:
             t = yf.Ticker(sym + ".NS")
-            hist = t.history(period="4mo")
+            hist = t.history(period="6mo")
             if len(hist) >= 50:
                 ema20 = round(float(hist["Close"].ewm(span=20, adjust=False).mean().iloc[-1]), 2)
                 ema50 = round(float(hist["Close"].ewm(span=50, adjust=False).mean().iloc[-1]), 2)
-                out[sym] = {"ema20": ema20, "ema50": ema50}
+                out[sym] = {"ema20": ema20, "ema50": ema50, "vcp": detect_vcp(hist)}
         except Exception:
             pass
     return out
@@ -763,12 +802,16 @@ def render_holdings_tab():
                         cross_badge = f"<span style='font-size:9.5px;font-weight:700;color:{GREEN};background:#1B3B2A;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>✨ GOLDEN CROSS</span>"
                     else:
                         cross_badge = ""
+                    vcp_badge = (
+                        f"<span style='font-size:9.5px;font-weight:700;color:{ACCENT};background:#232047;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>🎯 VCP</span>"
+                        if r.get("VCP") else ""
+                    )
                     with ac2:
                         if st.button(r["Symbol"], key=f"btn_{r['Symbol']}", use_container_width=True):
                             st.session_state.selected_symbol = r["Symbol"]
                         st.markdown(
                             f"<div class='num' style='font-size:13px;color:{MUTED};margin-top:-14px;padding:0 8px 4px'>"
-                            f"{r['Shares']} share{'s' if r['Shares'] != 1 else ''} · avg ₹{r['Avg Price']:.2f}{cross_badge}</div>",
+                            f"{r['Shares']} share{'s' if r['Shares'] != 1 else ''} · avg ₹{r['Avg Price']:.2f}{cross_badge}{vcp_badge}</div>",
                             unsafe_allow_html=True,
                         )
                 c2.markdown(f"<div style='padding-top:6px'>{sparkline_svg(spark, spark_color)}</div>", unsafe_allow_html=True)
@@ -1150,6 +1193,10 @@ def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, 
                 )
             else:
                 cross_badge = ""
+            vcp_badge = (
+                f"<span style='font-size:9.5px;font-weight:700;color:{ACCENT};background:#232047;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>🎯 VCP</span>"
+                if tech and tech.get("vcp") else ""
+            )
 
             rc1, rc2, rc3, rc4, rc5, rc6, rc7, rc8 = st.columns(WL_COL_WIDTHS)
             with rc1:
@@ -1157,7 +1204,7 @@ def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, 
                 a1.markdown(avatar_html(sym), unsafe_allow_html=True)
                 with a2:
                     a2.markdown(f"<div style='padding-top:4px;font-weight:600;font-size:15px'>{sym}{badge}{paper_badge}</div>", unsafe_allow_html=True)
-                    a2.markdown(f"<div class='num' style='font-size:12.5px;color:{MUTED}'>Rank #{wrow['Rank']} · score {wrow['Score']:.2f}{cross_badge}</div>", unsafe_allow_html=True)
+                    a2.markdown(f"<div class='num' style='font-size:12.5px;color:{MUTED}'>Rank #{wrow['Rank']} · score {wrow['Score']:.2f}{cross_badge}{vcp_badge}</div>", unsafe_allow_html=True)
             rc2.markdown(f"<div style='padding-top:10px'>{sparkline_svg(spark, spark_color, width=64)}</div>", unsafe_allow_html=True)
             rc3.markdown(f"<div class='num' style='padding-top:12px;font-size:15px;font-weight:600'>{cmp_str}</div>", unsafe_allow_html=True)
             rc4.markdown(f"<div class='num' style='padding-top:12px;font-size:14px;color:{day_color};font-weight:600'>{day_str}</div>", unsafe_allow_html=True)
@@ -1490,12 +1537,16 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
                 else:
                     below20_str = below50_str = "—"
                     cross_badge = ""
+                vcp_badge = (
+                    f"<span style='font-size:9.5px;font-weight:700;color:{ACCENT};background:#232047;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>🎯 VCP</span>"
+                    if tech and tech.get("vcp") else ""
+                )
 
                 position_value = pos['qty'] * cmp
 
                 pc = st.columns(pos_cols)
                 pc[0].markdown(
-                    f"<div style='padding-top:4px;font-weight:600'>{sym}{cross_badge}</div>"
+                    f"<div style='padding-top:4px;font-weight:600'>{sym}{cross_badge}{vcp_badge}</div>"
                     f"<div class='num' style='font-size:12px;color:{MUTED}'>Buy ₹{pos['avg']:.2f}</div>",
                     unsafe_allow_html=True,
                 )
