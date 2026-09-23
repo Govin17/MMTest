@@ -635,12 +635,19 @@ def render_holdings_tab():
                 with c1:
                     ac1, ac2 = st.columns([0.5, 3])
                     ac1.markdown(avatar_html(r["Symbol"]), unsafe_allow_html=True)
+                    cross_bearish = r.get("EMA Cross Bearish")
+                    if cross_bearish is True:
+                        cross_badge = f"<span style='font-size:9.5px;font-weight:700;color:{RED};background:#3A1C18;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>☠ DEATH CROSS</span>"
+                    elif cross_bearish is False:
+                        cross_badge = f"<span style='font-size:9.5px;font-weight:700;color:{GREEN};background:#1B3B2A;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>✨ GOLDEN CROSS</span>"
+                    else:
+                        cross_badge = ""
                     with ac2:
                         if st.button(r["Symbol"], key=f"btn_{r['Symbol']}", use_container_width=True):
                             st.session_state.selected_symbol = r["Symbol"]
                         st.markdown(
                             f"<div class='num' style='font-size:13px;color:{MUTED};margin-top:-14px;padding:0 8px 4px'>"
-                            f"{r['Shares']} share{'s' if r['Shares'] != 1 else ''} · avg ₹{r['Avg Price']:.2f}</div>",
+                            f"{r['Shares']} share{'s' if r['Shares'] != 1 else ''} · avg ₹{r['Avg Price']:.2f}{cross_badge}</div>",
                             unsafe_allow_html=True,
                         )
                 c2.markdown(f"<div style='padding-top:6px'>{sparkline_svg(spark, spark_color)}</div>", unsafe_allow_html=True)
@@ -934,6 +941,7 @@ def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, 
 
         wl_symbols = [s["Symbol"] for s in stocks]
         wl_detail = fetch_watchlist_detail(tuple(wl_symbols))
+        wl_technicals = fetch_technicals(tuple(wl_symbols))
 
         linked_portfolio = active_wl.get("linked_portfolio")
         session_active_portfolio = st.session_state.get("active_portfolio")
@@ -976,6 +984,15 @@ def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, 
             badge = f"<span style='font-size:10px;font-weight:600;color:{GREEN};background:#1B3B2A;border-radius:4px;padding:1px 5px;margin-left:6px'>in book</span>" if in_book else ""
             paper_badge = f"<span style='font-size:10px;font-weight:600;color:{ACCENT};background:#33304D;border-radius:4px;padding:1px 5px;margin-left:6px'>paper: {held_qty}</span>" if held_qty else ""
             spark_color = GREEN if (spark and spark[-1] >= spark[0]) else RED
+            tech = wl_technicals.get(sym)
+            if tech:
+                cross_badge = (
+                    f"<span style='font-size:9.5px;font-weight:700;color:{RED};background:#3A1C18;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>☠ DEATH CROSS</span>"
+                    if tech["ema20"] < tech["ema50"] else
+                    f"<span style='font-size:9.5px;font-weight:700;color:{GREEN};background:#1B3B2A;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>✨ GOLDEN CROSS</span>"
+                )
+            else:
+                cross_badge = ""
 
             rc1, rc2, rc3, rc4, rc5, rc6, rc7, rc8 = st.columns(WL_COL_WIDTHS)
             with rc1:
@@ -983,7 +1000,7 @@ def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, 
                 a1.markdown(avatar_html(sym), unsafe_allow_html=True)
                 with a2:
                     a2.markdown(f"<div style='padding-top:4px;font-weight:600;font-size:15px'>{sym}{badge}{paper_badge}</div>", unsafe_allow_html=True)
-                    a2.markdown(f"<div class='num' style='font-size:12.5px;color:{MUTED}'>Rank #{wrow['Rank']} · score {wrow['Score']:.2f}</div>", unsafe_allow_html=True)
+                    a2.markdown(f"<div class='num' style='font-size:12.5px;color:{MUTED}'>Rank #{wrow['Rank']} · score {wrow['Score']:.2f}{cross_badge}</div>", unsafe_allow_html=True)
             rc2.markdown(f"<div style='padding-top:10px'>{sparkline_svg(spark, spark_color, width=64)}</div>", unsafe_allow_html=True)
             rc3.markdown(f"<div class='num' style='padding-top:12px;font-size:15px;font-weight:600'>{cmp_str}</div>", unsafe_allow_html=True)
             rc4.markdown(f"<div class='num' style='padding-top:12px;font-size:14px;color:{day_color};font-weight:600'>{day_str}</div>", unsafe_allow_html=True)
