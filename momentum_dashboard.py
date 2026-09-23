@@ -211,7 +211,19 @@ st.markdown(f"""
     }}
     .st-key-pp_metrics, [class*="st-key-pp_metrics_"] {{
         background: {CARD_ALT}; border: 1px solid {BORDER}; border-radius: 10px;
-        padding: 18px 20px; margin-bottom: 6px;
+        padding: 13px 15px; margin-bottom: 6px;
+    }}
+    .st-key-pp_metrics [data-testid="stMetric"], [class*="st-key-pp_metrics_"] [data-testid="stMetric"] {{
+        padding: 12px 15px !important;
+    }}
+    .st-key-pp_metrics [data-testid="stMetricValue"], [class*="st-key-pp_metrics_"] [data-testid="stMetricValue"] {{
+        font-size: 1.5rem !important;
+    }}
+    .st-key-pp_metrics [data-testid="stMetricLabel"], [class*="st-key-pp_metrics_"] [data-testid="stMetricLabel"] {{
+        font-size: 0.78rem !important;
+    }}
+    .st-key-pp_metrics div[data-testid="stHorizontalBlock"], [class*="st-key-pp_metrics_"] div[data-testid="stHorizontalBlock"] {{
+        gap: 10px !important;
     }}
 
     [data-testid="stExpander"] {{
