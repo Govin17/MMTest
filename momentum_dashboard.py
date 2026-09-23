@@ -260,14 +260,47 @@ st.markdown(f"""
         }}
 
         .stTabs [data-baseweb="tab"] {{ padding: 6px 10px !important; font-size: 13px !important; }}
+        .stTabs {{ overflow-x: auto !important; }}
+        .stTabs [data-baseweb="tab-list"] {{ flex-wrap: nowrap !important; }}
 
-        div[style*="overflow:hidden"] {{
+        /* Pill bars (sort / timeframe pills) — swipeable single-line strip
+           instead of wrapping onto many lines. */
+        .st-key-sort_pills, [class*="st-key-wl_sort_pills"], [class*="st-key-pp_sort_pills"],
+        .st-key-pv_timeframe, [class*="st-key-pp_pv_timeframe"] {{
             overflow-x: auto !important;
             -webkit-overflow-scrolling: touch;
         }}
+        .st-key-sort_pills div[data-testid="stHorizontalBlock"],
+        [class*="st-key-wl_sort_pills"] div[data-testid="stHorizontalBlock"],
+        [class*="st-key-pp_sort_pills"] div[data-testid="stHorizontalBlock"],
+        .st-key-pv_timeframe div[data-testid="stHorizontalBlock"],
+        [class*="st-key-pp_pv_timeframe"] div[data-testid="stHorizontalBlock"] {{
+            flex-wrap: nowrap !important;
+            width: max-content !important;
+        }}
 
-        [data-testid="column"] {{ min-width: 0 !important; }}
-        div[data-testid="stHorizontalBlock"] {{ flex-wrap: wrap !important; gap: 4px !important; }}
+        /* Dense tables (Holdings / Watchlist / Paper Trading positions) —
+           scroll sideways as one aligned block instead of squashing every
+           column unreadably thin. */
+        .st-key-holdings_table_scroll, [class*="st-key-wl_table_scroll_"], [class*="st-key-pp_table_scroll_"] {{
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch;
+        }}
+        .st-key-holdings_table_scroll [data-testid="stVerticalBlock"],
+        [class*="st-key-wl_table_scroll_"] [data-testid="stVerticalBlock"],
+        [class*="st-key-pp_table_scroll_"] [data-testid="stVerticalBlock"] {{
+            min-width: 620px !important;
+        }}
+        .st-key-holdings_table_scroll div[data-testid="stHorizontalBlock"],
+        [class*="st-key-wl_table_scroll_"] div[data-testid="stHorizontalBlock"],
+        [class*="st-key-pp_table_scroll_"] div[data-testid="stHorizontalBlock"] {{
+            flex-wrap: nowrap !important;
+        }}
+        .st-key-holdings_table_scroll [data-testid="column"],
+        [class*="st-key-wl_table_scroll_"] [data-testid="column"],
+        [class*="st-key-pp_table_scroll_"] [data-testid="column"] {{
+            min-width: fit-content !important;
+        }}
 
         span[style*="white-space:nowrap"] {{ font-size: 8.5px !important; padding: 1px 4px !important; }}
 
@@ -798,6 +831,7 @@ def render_holdings_tab():
     col_table, col_detail = st.columns([2, 1], gap="medium")
 
     with col_table:
+      with st.container(key="holdings_table_scroll"):
         st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
 
         with st.container(key="sort_pills"):
@@ -846,8 +880,9 @@ def render_holdings_tab():
                     else:
                         cross_badge = ""
                     vcp_badge = (
-                        f"<span style='font-size:9.5px;font-weight:700;color:{ACCENT};background:#232047;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>🎯 VCP</span>"
-                        if r.get("VCP") else ""
+                        f"<span style='font-size:9.5px;font-weight:700;color:{ACCENT};background:#232047;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>🎯 VCP: YES</span>"
+                        if r.get("VCP") else
+                        f"<span style='font-size:9.5px;font-weight:700;color:{MUTED};background:#232326;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>VCP: NO</span>"
                     )
                     with ac2:
                         if st.button(r["Symbol"], key=f"btn_{r['Symbol']}", use_container_width=True):
@@ -1208,97 +1243,99 @@ def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, 
         else:
             st.caption("No paper portfolio exists yet — create one in the Paper Trading tab to enable Buy/Sell here.")
 
-        st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
-        WL_COL_WIDTHS = [2.4, 0.9, 1.15, 1.15, 0.9, 0.55, 0.55, 0.35]
-        hdr = st.columns(WL_COL_WIDTHS)
-        for h, label in zip(hdr, ["COMPANY", "TREND", "MKT PRICE", "1D CHANGE", "1D VOL", "", "", ""]):
-            h.markdown(f"<span style='font-size:12px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
+        with st.container(key=f"wl_table_scroll_{active_name}"):
+            st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
+            WL_COL_WIDTHS = [2.4, 0.9, 1.15, 1.15, 0.9, 0.55, 0.55, 0.35]
+            hdr = st.columns(WL_COL_WIDTHS)
+            for h, label in zip(hdr, ["COMPANY", "TREND", "MKT PRICE", "1D CHANGE", "1D VOL", "", "", ""]):
+                h.markdown(f"<span style='font-size:12px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
 
-        for wrow in stocks:
-            sym = wrow["Symbol"]
-            in_book = sym in holding_symbols
-            d = wl_detail.get(sym, {})
-            cmp, day_abs, day_pct, volume, spark = d.get("cmp"), d.get("day_abs"), d.get("day_pct"), d.get("volume"), d.get("spark") or []
-            cmp_str = f"₹{cmp:,.2f}" if cmp else "—"
-            day_color = GREEN if (day_pct is not None and day_pct >= 0) else RED
-            day_str = f"{day_abs:+,.2f} ({day_pct:+.2f}%)" if day_abs is not None else "—"
-            vol_str = f"{volume:,}" if volume else "—"
-            held_qty = positions.get(sym, {"qty": 0})["qty"]
-            badge = f"<span style='font-size:10px;font-weight:600;color:{GREEN};background:#1B3B2A;border-radius:4px;padding:1px 5px;margin-left:6px'>in book</span>" if in_book else ""
-            paper_badge = f"<span style='font-size:10px;font-weight:600;color:{ACCENT};background:#33304D;border-radius:4px;padding:1px 5px;margin-left:6px'>paper: {held_qty}</span>" if held_qty else ""
-            spark_color = GREEN if (spark and spark[-1] >= spark[0]) else RED
-            tech = wl_technicals.get(sym)
-            if tech:
-                cross_badge = (
-                    f"<span style='font-size:9.5px;font-weight:700;color:{RED};background:#3A1C18;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>☠ DEATH CROSS</span>"
-                    if tech["ema20"] < tech["ema50"] else
-                    f"<span style='font-size:9.5px;font-weight:700;color:{GREEN};background:#1B3B2A;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>✨ GOLDEN CROSS</span>"
+            for wrow in stocks:
+                sym = wrow["Symbol"]
+                in_book = sym in holding_symbols
+                d = wl_detail.get(sym, {})
+                cmp, day_abs, day_pct, volume, spark = d.get("cmp"), d.get("day_abs"), d.get("day_pct"), d.get("volume"), d.get("spark") or []
+                cmp_str = f"₹{cmp:,.2f}" if cmp else "—"
+                day_color = GREEN if (day_pct is not None and day_pct >= 0) else RED
+                day_str = f"{day_abs:+,.2f} ({day_pct:+.2f}%)" if day_abs is not None else "—"
+                vol_str = f"{volume:,}" if volume else "—"
+                held_qty = positions.get(sym, {"qty": 0})["qty"]
+                badge = f"<span style='font-size:10px;font-weight:600;color:{GREEN};background:#1B3B2A;border-radius:4px;padding:1px 5px;margin-left:6px'>in book</span>" if in_book else ""
+                paper_badge = f"<span style='font-size:10px;font-weight:600;color:{ACCENT};background:#33304D;border-radius:4px;padding:1px 5px;margin-left:6px'>paper: {held_qty}</span>" if held_qty else ""
+                spark_color = GREEN if (spark and spark[-1] >= spark[0]) else RED
+                tech = wl_technicals.get(sym)
+                if tech:
+                    cross_badge = (
+                        f"<span style='font-size:9.5px;font-weight:700;color:{RED};background:#3A1C18;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>☠ DEATH CROSS</span>"
+                        if tech["ema20"] < tech["ema50"] else
+                        f"<span style='font-size:9.5px;font-weight:700;color:{GREEN};background:#1B3B2A;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>✨ GOLDEN CROSS</span>"
+                    )
+                else:
+                    cross_badge = ""
+                vcp_badge = (
+                    f"<span style='font-size:9.5px;font-weight:700;color:{ACCENT};background:#232047;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>🎯 VCP: YES</span>"
+                    if tech and tech.get("vcp") else
+                    (f"<span style='font-size:9.5px;font-weight:700;color:{MUTED};background:#232326;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>VCP: NO</span>" if tech else "")
                 )
-            else:
-                cross_badge = ""
-            vcp_badge = (
-                f"<span style='font-size:9.5px;font-weight:700;color:{ACCENT};background:#232047;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>🎯 VCP</span>"
-                if tech and tech.get("vcp") else ""
-            )
 
-            rc1, rc2, rc3, rc4, rc5, rc6, rc7, rc8 = st.columns(WL_COL_WIDTHS)
-            with rc1:
-                a1, a2 = st.columns([0.5, 3])
-                a1.markdown(avatar_html(sym), unsafe_allow_html=True)
-                with a2:
-                    a2.markdown(f"<div style='padding-top:4px;font-weight:600;font-size:15px'>{sym}{badge}{paper_badge}</div>", unsafe_allow_html=True)
-                    a2.markdown(f"<div class='num' style='font-size:12.5px;color:{MUTED}'>Rank #{wrow['Rank']} · score {wrow['Score']:.2f}{cross_badge}{vcp_badge}</div>", unsafe_allow_html=True)
-            rc2.markdown(f"<div style='padding-top:10px'>{sparkline_svg(spark, spark_color, width=64)}</div>", unsafe_allow_html=True)
-            rc3.markdown(f"<div class='num' style='padding-top:12px;font-size:15px;font-weight:600'>{cmp_str}</div>", unsafe_allow_html=True)
-            rc4.markdown(f"<div class='num' style='padding-top:12px;font-size:14px;color:{day_color};font-weight:600'>{day_str}</div>", unsafe_allow_html=True)
-            rc5.markdown(f"<div class='num' style='padding-top:12px;font-size:14px;color:{MUTED}'>{vol_str}</div>", unsafe_allow_html=True)
+                rc1, rc2, rc3, rc4, rc5, rc6, rc7, rc8 = st.columns(WL_COL_WIDTHS)
+                with rc1:
+                    a1, a2 = st.columns([0.5, 3])
+                    a1.markdown(avatar_html(sym), unsafe_allow_html=True)
+                    with a2:
+                        a2.markdown(f"<div style='padding-top:4px;font-weight:600;font-size:15px'>{sym}{badge}{paper_badge}</div>", unsafe_allow_html=True)
+                        a2.markdown(f"<div class='num' style='font-size:12.5px;color:{MUTED}'>Rank #{wrow['Rank']} · score {wrow['Score']:.2f}{cross_badge}{vcp_badge}</div>", unsafe_allow_html=True)
+                rc2.markdown(f"<div style='padding-top:10px'>{sparkline_svg(spark, spark_color, width=64)}</div>", unsafe_allow_html=True)
+                rc3.markdown(f"<div class='num' style='padding-top:12px;font-size:15px;font-weight:600'>{cmp_str}</div>", unsafe_allow_html=True)
+                rc4.markdown(f"<div class='num' style='padding-top:12px;font-size:14px;color:{day_color};font-weight:600'>{day_str}</div>", unsafe_allow_html=True)
+                rc5.markdown(f"<div class='num' style='padding-top:12px;font-size:14px;color:{MUTED}'>{vol_str}</div>", unsafe_allow_html=True)
 
-            with rc6:
-                with st.container(key=f"wl_buytrig_{active_name}_{sym}"):
-                    with st.popover("B", use_container_width=True):
-                        st.markdown(f"<div style='font-weight:600;margin-bottom:6px'>Buy {sym}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div class='num' style='font-size:13px;color:{MUTED};margin-bottom:8px'>Live CMP: {cmp_str}</div>", unsafe_allow_html=True)
-                        if trade_portfolio is None:
-                            st.caption("No paper portfolio exists yet — create one in the Paper Trading tab.")
-                        buy_qty = st.number_input("Qty", min_value=1, value=1, step=1, key=f"wl_buyqty_{active_name}_{sym}")
-                        buy_click = st.button("🟢 Confirm Buy", key=f"wl_buy_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None)
-            with rc7:
-                with st.container(key=f"wl_selltrig_{active_name}_{sym}"):
-                    with st.popover("S", use_container_width=True):
-                        st.markdown(f"<div style='font-weight:600;margin-bottom:6px'>Sell {sym}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div class='num' style='font-size:13px;color:{MUTED};margin-bottom:8px'>Live CMP: {cmp_str} · Held: {held_qty}</div>", unsafe_allow_html=True)
-                        if trade_portfolio is None:
-                            st.caption("No paper portfolio exists yet — create one in the Paper Trading tab.")
-                        elif held_qty < 1:
-                            st.caption("You don't hold any shares of this stock in the linked portfolio.")
-                        sell_qty = st.number_input("Qty", min_value=1, max_value=max(held_qty, 1), value=1, step=1, key=f"wl_sellqty_{active_name}_{sym}")
-                        sell_click = st.button("🔴 Confirm Sell", key=f"wl_sell_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None or held_qty < 1)
-            with rc8:
-                remove_click = st.button("✕", key=f"wl_remove_{active_name}_{sym}", use_container_width=True, help=f"Remove {sym} from this watchlist")
+                with rc6:
+                    with st.container(key=f"wl_buytrig_{active_name}_{sym}"):
+                        with st.popover("B", use_container_width=True):
+                            st.markdown(f"<div style='font-weight:600;margin-bottom:6px'>Buy {sym}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div class='num' style='font-size:13px;color:{MUTED};margin-bottom:8px'>Live CMP: {cmp_str}</div>", unsafe_allow_html=True)
+                            if trade_portfolio is None:
+                                st.caption("No paper portfolio exists yet — create one in the Paper Trading tab.")
+                            buy_qty = st.number_input("Qty", min_value=1, value=1, step=1, key=f"wl_buyqty_{active_name}_{sym}")
+                            buy_click = st.button("🟢 Confirm Buy", key=f"wl_buy_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None)
+                with rc7:
+                    with st.container(key=f"wl_selltrig_{active_name}_{sym}"):
+                        with st.popover("S", use_container_width=True):
+                            st.markdown(f"<div style='font-weight:600;margin-bottom:6px'>Sell {sym}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div class='num' style='font-size:13px;color:{MUTED};margin-bottom:8px'>Live CMP: {cmp_str} · Held: {held_qty}</div>", unsafe_allow_html=True)
+                            if trade_portfolio is None:
+                                st.caption("No paper portfolio exists yet — create one in the Paper Trading tab.")
+                            elif held_qty < 1:
+                                st.caption("You don't hold any shares of this stock in the linked portfolio.")
+                            sell_qty = st.number_input("Qty", min_value=1, max_value=max(held_qty, 1), value=1, step=1, key=f"wl_sellqty_{active_name}_{sym}")
+                            sell_click = st.button("🔴 Confirm Sell", key=f"wl_sell_{active_name}_{sym}", use_container_width=True, disabled=trade_portfolio is None or held_qty < 1)
+                with rc8:
+                    remove_click = st.button("✕", key=f"wl_remove_{active_name}_{sym}", use_container_width=True, help=f"Remove {sym} from this watchlist")
 
-            if buy_click:
-                if cmp is None:
-                    st.error(f"No live price for {sym} — can't trade.")
-                elif buy_qty * cmp > cash:
-                    st.error(f"Not enough paper cash (₹{cash:,.0f}) to buy {buy_qty} {sym} @ ₹{cmp:.2f}.")
-                else:
-                    save_paper_trade(trade_portfolio, sym, "BUY", buy_qty, cmp)
-                    st.success(f"Paper-bought {buy_qty} {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
+                if buy_click:
+                    if cmp is None:
+                        st.error(f"No live price for {sym} — can't trade.")
+                    elif buy_qty * cmp > cash:
+                        st.error(f"Not enough paper cash (₹{cash:,.0f}) to buy {buy_qty} {sym} @ ₹{cmp:.2f}.")
+                    else:
+                        save_paper_trade(trade_portfolio, sym, "BUY", buy_qty, cmp)
+                        st.success(f"Paper-bought {buy_qty} {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
+                        st.rerun()
+                if sell_click:
+                    if cmp is None:
+                        st.error(f"No live price for {sym} — can't trade.")
+                    else:
+                        save_paper_trade(trade_portfolio, sym, "SELL", sell_qty, cmp)
+                        st.success(f"Paper-sold {sell_qty} {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
+                        st.rerun()
+                if remove_click:
+                    active_wl["stocks"] = [s for s in stocks if s["Symbol"] != sym]
+                    watchlists[active_name] = active_wl
+                    save_watchlists(watchlists)
                     st.rerun()
-            if sell_click:
-                if cmp is None:
-                    st.error(f"No live price for {sym} — can't trade.")
-                else:
-                    save_paper_trade(trade_portfolio, sym, "SELL", sell_qty, cmp)
-                    st.success(f"Paper-sold {sell_qty} {sym} @ ₹{cmp:.2f} in {trade_portfolio}")
-                    st.rerun()
-            if remove_click:
-                active_wl["stocks"] = [s for s in stocks if s["Symbol"] != sym]
-                watchlists[active_name] = active_wl
-                save_watchlists(watchlists)
-                st.rerun()
 
-        st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
 
 
@@ -1556,79 +1593,81 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
                 reverse=_pp_reverse,
             )
 
-            st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
-            pos_cols = [1.7, 0.7, 0.85, 0.95, 0.85, 0.85, 0.85, 0.5, 0.5]
-            pcols = st.columns(pos_cols)
-            for h, label in zip(pcols, ["STOCK", "QTY", "CMP", "VALUE", "P&L %", "BELOW EMA20", "BELOW EMA50", "", ""]):
-                h.markdown(f"<span style='font-size:12px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
+        with st.container(key=f"pp_table_scroll_{active_portfolio}"):
+                st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
+                pos_cols = [1.7, 0.7, 0.85, 0.95, 0.85, 0.85, 0.85, 0.5, 0.5]
+                pcols = st.columns(pos_cols)
+                for h, label in zip(pcols, ["STOCK", "QTY", "CMP", "VALUE", "P&L %", "BELOW EMA20", "BELOW EMA50", "", ""]):
+                    h.markdown(f"<span style='font-size:12px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
 
-            for sym in open_symbols:
-                pos = positions[sym]
-                cmp = live_prices.get(sym) or pos["avg"]
-                pnl_pct = ((cmp - pos["avg"]) / pos["avg"] * 100) if pos["avg"] else 0
-                pnl_color = GREEN if pnl_pct >= 0 else RED
+                for sym in open_symbols:
+                    pos = positions[sym]
+                    cmp = live_prices.get(sym) or pos["avg"]
+                    pnl_pct = ((cmp - pos["avg"]) / pos["avg"] * 100) if pos["avg"] else 0
+                    pnl_color = GREEN if pnl_pct >= 0 else RED
 
-                tech = technicals.get(sym)
-                if tech:
-                    below20_str = "🔴 Yes" if cmp < tech["ema20"] else "🟢 No"
-                    below50_str = "🔴 Yes" if cmp < tech["ema50"] else "🟢 No"
-                    cross_badge = (
-                        f"<span style='font-size:9.5px;font-weight:700;color:{RED};background:#3A1C18;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>☠ DEATH CROSS</span>"
-                        if tech["ema20"] < tech["ema50"] else
-                        f"<span style='font-size:9.5px;font-weight:700;color:{GREEN};background:#1B3B2A;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>✨ GOLDEN CROSS</span>"
-                    )
-                else:
-                    below20_str = below50_str = "—"
-                    cross_badge = ""
-                vcp_badge = (
-                    f"<span style='font-size:9.5px;font-weight:700;color:{ACCENT};background:#232047;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>🎯 VCP</span>"
-                    if tech and tech.get("vcp") else ""
-                )
-
-                position_value = pos['qty'] * cmp
-
-                pc = st.columns(pos_cols)
-                pc[0].markdown(
-                    f"<div style='padding-top:4px;font-weight:600'>{sym}{cross_badge}{vcp_badge}</div>"
-                    f"<div class='num' style='font-size:12px;color:{MUTED}'>Buy ₹{pos['avg']:.2f}</div>",
-                    unsafe_allow_html=True,
-                )
-                pc[1].markdown(f"<div class='num' style='padding-top:6px'>{pos['qty']}</div>", unsafe_allow_html=True)
-                pc[2].markdown(f"<div class='num' style='padding-top:6px'>₹{cmp:.2f}</div>", unsafe_allow_html=True)
-                pc[3].markdown(f"<div class='num' style='padding-top:6px;font-weight:600'>₹{position_value:,.2f}</div>", unsafe_allow_html=True)
-                pc[4].markdown(f"<div class='num' style='padding-top:6px;color:{pnl_color};font-weight:600'>{pnl_pct:+.1f}%</div>", unsafe_allow_html=True)
-                pc[5].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{below20_str}</div>", unsafe_allow_html=True)
-                pc[6].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{below50_str}</div>", unsafe_allow_html=True)
-
-                with pc[7]:
-                    with st.container(key=f"pos_buytrig_{active_portfolio}_{sym}"):
-                        with st.popover("B", use_container_width=True):
-                            st.markdown(f"<div style='font-weight:600;margin-bottom:6px'>Buy {sym}</div>", unsafe_allow_html=True)
-                            st.markdown(f"<div class='num' style='font-size:13px;color:{MUTED};margin-bottom:8px'>Live CMP: ₹{cmp:.2f}</div>", unsafe_allow_html=True)
-                            pos_buy_qty = st.number_input("Qty", min_value=1, value=1, step=1, key=f"pos_buyqty_{active_portfolio}_{sym}")
-                            pos_buy_click = st.button("🟢 Confirm Buy", key=f"pos_buy_{active_portfolio}_{sym}", use_container_width=True)
-                with pc[8]:
-                    with st.container(key=f"pos_selltrig_{active_portfolio}_{sym}"):
-                        with st.popover("S", use_container_width=True):
-                            st.markdown(f"<div style='font-weight:600;margin-bottom:6px'>Sell {sym}</div>", unsafe_allow_html=True)
-                            st.markdown(f"<div class='num' style='font-size:13px;color:{MUTED};margin-bottom:8px'>Live CMP: ₹{cmp:.2f} · Held: {pos['qty']}</div>", unsafe_allow_html=True)
-                            pos_sell_qty = st.number_input("Qty", min_value=1, max_value=max(pos['qty'], 1), value=1, step=1, key=f"pos_sellqty_{active_portfolio}_{sym}")
-                            pos_sell_click = st.button("🔴 Confirm Sell", key=f"pos_sell_{active_portfolio}_{sym}", use_container_width=True)
-
-                if pos_buy_click:
-                    if cmp is None:
-                        st.error(f"No live price for {sym} — can't trade.")
-                    elif pos_buy_qty * cmp > cash:
-                        st.error(f"Not enough paper cash (₹{cash:,.0f}) to buy {pos_buy_qty} {sym} @ ₹{cmp:.2f}.")
+                    tech = technicals.get(sym)
+                    if tech:
+                        below20_str = "🔴 Yes" if cmp < tech["ema20"] else "🟢 No"
+                        below50_str = "🔴 Yes" if cmp < tech["ema50"] else "🟢 No"
+                        cross_badge = (
+                            f"<span style='font-size:9.5px;font-weight:700;color:{RED};background:#3A1C18;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>☠ DEATH CROSS</span>"
+                            if tech["ema20"] < tech["ema50"] else
+                            f"<span style='font-size:9.5px;font-weight:700;color:{GREEN};background:#1B3B2A;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>✨ GOLDEN CROSS</span>"
+                        )
                     else:
-                        save_paper_trade(active_portfolio, sym, "BUY", pos_buy_qty, cmp)
-                        st.success(f"Bought {pos_buy_qty} {sym} @ ₹{cmp:.2f} in {active_portfolio}")
+                        below20_str = below50_str = "—"
+                        cross_badge = ""
+                    vcp_badge = (
+                        f"<span style='font-size:9.5px;font-weight:700;color:{ACCENT};background:#232047;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>🎯 VCP: YES</span>"
+                        if tech and tech.get("vcp") else
+                        (f"<span style='font-size:9.5px;font-weight:700;color:{MUTED};background:#232326;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>VCP: NO</span>" if tech else "")
+                    )
+
+                    position_value = pos['qty'] * cmp
+
+                    pc = st.columns(pos_cols)
+                    pc[0].markdown(
+                        f"<div style='padding-top:4px;font-weight:600'>{sym}{cross_badge}{vcp_badge}</div>"
+                        f"<div class='num' style='font-size:12px;color:{MUTED}'>Buy ₹{pos['avg']:.2f}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    pc[1].markdown(f"<div class='num' style='padding-top:6px'>{pos['qty']}</div>", unsafe_allow_html=True)
+                    pc[2].markdown(f"<div class='num' style='padding-top:6px'>₹{cmp:.2f}</div>", unsafe_allow_html=True)
+                    pc[3].markdown(f"<div class='num' style='padding-top:6px;font-weight:600'>₹{position_value:,.2f}</div>", unsafe_allow_html=True)
+                    pc[4].markdown(f"<div class='num' style='padding-top:6px;color:{pnl_color};font-weight:600'>{pnl_pct:+.1f}%</div>", unsafe_allow_html=True)
+                    pc[5].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{below20_str}</div>", unsafe_allow_html=True)
+                    pc[6].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{below50_str}</div>", unsafe_allow_html=True)
+
+                    with pc[7]:
+                        with st.container(key=f"pos_buytrig_{active_portfolio}_{sym}"):
+                            with st.popover("B", use_container_width=True):
+                                st.markdown(f"<div style='font-weight:600;margin-bottom:6px'>Buy {sym}</div>", unsafe_allow_html=True)
+                                st.markdown(f"<div class='num' style='font-size:13px;color:{MUTED};margin-bottom:8px'>Live CMP: ₹{cmp:.2f}</div>", unsafe_allow_html=True)
+                                pos_buy_qty = st.number_input("Qty", min_value=1, value=1, step=1, key=f"pos_buyqty_{active_portfolio}_{sym}")
+                                pos_buy_click = st.button("🟢 Confirm Buy", key=f"pos_buy_{active_portfolio}_{sym}", use_container_width=True)
+                    with pc[8]:
+                        with st.container(key=f"pos_selltrig_{active_portfolio}_{sym}"):
+                            with st.popover("S", use_container_width=True):
+                                st.markdown(f"<div style='font-weight:600;margin-bottom:6px'>Sell {sym}</div>", unsafe_allow_html=True)
+                                st.markdown(f"<div class='num' style='font-size:13px;color:{MUTED};margin-bottom:8px'>Live CMP: ₹{cmp:.2f} · Held: {pos['qty']}</div>", unsafe_allow_html=True)
+                                pos_sell_qty = st.number_input("Qty", min_value=1, max_value=max(pos['qty'], 1), value=1, step=1, key=f"pos_sellqty_{active_portfolio}_{sym}")
+                                pos_sell_click = st.button("🔴 Confirm Sell", key=f"pos_sell_{active_portfolio}_{sym}", use_container_width=True)
+
+                    if pos_buy_click:
+                        if cmp is None:
+                            st.error(f"No live price for {sym} — can't trade.")
+                        elif pos_buy_qty * cmp > cash:
+                            st.error(f"Not enough paper cash (₹{cash:,.0f}) to buy {pos_buy_qty} {sym} @ ₹{cmp:.2f}.")
+                        else:
+                            save_paper_trade(active_portfolio, sym, "BUY", pos_buy_qty, cmp)
+                            st.success(f"Bought {pos_buy_qty} {sym} @ ₹{cmp:.2f} in {active_portfolio}")
+                            st.rerun()
+                    if pos_sell_click:
+                        save_paper_trade(active_portfolio, sym, "SELL", pos_sell_qty, cmp)
+                        st.success(f"Sold {pos_sell_qty} {sym} @ ₹{cmp:.2f} in {active_portfolio}")
                         st.rerun()
-                if pos_sell_click:
-                    save_paper_trade(active_portfolio, sym, "SELL", pos_sell_qty, cmp)
-                    st.success(f"Sold {pos_sell_qty} {sym} @ ₹{cmp:.2f} in {active_portfolio}")
-                    st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
 
         # -- Trade history --------------------------------------------------
         port_trades = trades[trades["Portfolio"] == active_portfolio] if not trades.empty else trades
