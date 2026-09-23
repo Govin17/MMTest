@@ -230,6 +230,49 @@ st.markdown(f"""
         background: {CARD_TABLE}; border: 1px solid {BORDER}; border-radius: 10px;
     }}
     [data-testid="stExpander"] summary {{ font-weight: 600; font-size: 15px; }}
+
+    /* -----------------------------------------------------------------
+       Mobile — Streamlit already stacks st.columns vertically below
+       ~640px, so col_main/col_tools naturally go full-width on a phone.
+       This tightens up fonts, paddings and the pill/badge chrome so
+       nothing overflows the screen or gets crushed.
+       ----------------------------------------------------------------- */
+    @media (max-width: 640px) {{
+        .block-container {{ padding-left: 10px !important; padding-right: 10px !important; padding-top: 12px !important; }}
+        h1 {{ font-size: 21px !important; }}
+        h2, .stSubheader, [data-testid="stMarkdownContainer"] h3 {{ font-size: 16px !important; }}
+
+        .card, .card-alt, .card-upload {{ padding: 12px 14px !important; }}
+
+        [data-testid="stMetric"] {{ padding: 10px 12px !important; }}
+        [data-testid="stMetricValue"] {{ font-size: 1.3rem !important; }}
+        [data-testid="stMetricLabel"] {{ font-size: 0.68rem !important; }}
+        .st-key-pp_metrics [data-testid="stMetricValue"], [class*="st-key-pp_metrics_"] [data-testid="stMetricValue"] {{
+            font-size: 1.1rem !important;
+        }}
+
+        .st-key-sort_pills div.stButton > button,
+        [class*="st-key-wl_sort_pills"] div.stButton > button,
+        [class*="st-key-pp_sort_pills"] div.stButton > button,
+        .st-key-pv_timeframe div.stButton > button,
+        [class*="st-key-pp_pv_timeframe"] div.stButton > button {{
+            padding: 0 8px !important; font-size: 10.5px !important; height: 23px;
+        }}
+
+        .stTabs [data-baseweb="tab"] {{ padding: 6px 10px !important; font-size: 13px !important; }}
+
+        div[style*="overflow:hidden"] {{
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch;
+        }}
+
+        [data-testid="column"] {{ min-width: 0 !important; }}
+        div[data-testid="stHorizontalBlock"] {{ flex-wrap: wrap !important; gap: 4px !important; }}
+
+        span[style*="white-space:nowrap"] {{ font-size: 8.5px !important; padding: 1px 4px !important; }}
+
+        .num {{ font-size: 12px !important; }}
+    }}
 </style>
 """, unsafe_allow_html=True)
 
