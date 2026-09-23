@@ -119,7 +119,8 @@ st.markdown(f"""
     .st-key-sort_pills div.stButton > button,
     [class*="st-key-wl_sort_pills"] div.stButton > button,
     [class*="st-key-pp_sort_pills"] div.stButton > button,
-    .st-key-pv_timeframe div.stButton > button {{
+    .st-key-pv_timeframe div.stButton > button,
+    [class*="st-key-pp_pv_timeframe"] div.stButton > button {{
         border-radius: 999px !important; height: 27px; padding: 0 13px !important;
         font-size: 12.5px !important; font-weight: 600 !important;
         border: 1px solid {BORDER} !important; background: {CARD} !important;
@@ -129,7 +130,8 @@ st.markdown(f"""
     .st-key-sort_pills div.stButton > button:hover,
     [class*="st-key-wl_sort_pills"] div.stButton > button:hover,
     [class*="st-key-pp_sort_pills"] div.stButton > button:hover,
-    .st-key-pv_timeframe div.stButton > button:hover {{ background: {CARD_ALT} !important; }}
+    .st-key-pv_timeframe div.stButton > button:hover,
+    [class*="st-key-pp_pv_timeframe"] div.stButton > button:hover {{ background: {CARD_ALT} !important; }}
     .st-key-sort_pills div[data-testid="stHorizontalBlock"],
     [class*="st-key-wl_sort_pills"] div[data-testid="stHorizontalBlock"],
     [class*="st-key-pp_sort_pills"] div[data-testid="stHorizontalBlock"] {{ gap: 6px !important; align-items: center !important; }}
@@ -375,6 +377,60 @@ def avatar_html(symbol, size=34):
 
 
 @st.cache_data(ttl=5)
+def fetch_paper_value_series(trades_records, starting_cash):
+    """trades_records: tuple of (timestamp_iso, symbol, side, qty, price) sorted by time.
+    Returns a pandas Series of total portfolio value (cash + holdings, priced at each day's
+    close) indexed by date, or None if there isn't enough data to chart."""
+    if not trades_records:
+        return None
+
+    symbols = sorted(set(r[1] for r in trades_records))
+    price_series = {}
+    for sym in symbols:
+        try:
+            t = yf.Ticker(sym + ".NS")
+            hist = t.history(period="1y")
+            if not hist.empty:
+                s = hist["Close"]
+                if s.index.tz is not None:
+                    s.index = s.index.tz_localize(None)
+                s.index = s.index.normalize()
+                price_series[sym] = s
+        except Exception:
+            pass
+    if not price_series:
+        return None
+
+    combined = pd.DataFrame(price_series).sort_index().ffill()
+    first_trade_date = pd.Timestamp(trades_records[0][0]).normalize()
+    combined = combined[combined.index >= first_trade_date]
+    if combined.empty:
+        return None
+
+    norm_trades = [(pd.Timestamp(ts).normalize(), sym, side, qty, price) for ts, sym, side, qty, price in trades_records]
+
+    values = []
+    for dt in combined.index:
+        cash = starting_cash
+        shares = {s: 0 for s in symbols}
+        for ts_dt, sym, side, qty, price in norm_trades:
+            if ts_dt <= dt:
+                if side == "BUY":
+                    cash -= qty * price
+                    shares[sym] += qty
+                else:
+                    cash += qty * price
+                    shares[sym] -= qty
+        holdings_value = sum(
+            shares[s] * combined.loc[dt, s] for s in symbols
+            if s in combined.columns and pd.notna(combined.loc[dt, s])
+        )
+        values.append(cash + holdings_value)
+
+    return pd.Series(values, index=combined.index)
+
+
+@st.cache_data(ttl=5)
 def fetch_technicals(symbols):
     """EMA20/EMA50 for arbitrary NSE symbols (used by paper portfolios)."""
     out = {}
@@ -510,6 +566,7 @@ with c2:
         fetch_watchlist_prices.clear()
         fetch_watchlist_detail.clear()
         fetch_technicals.clear()
+        fetch_paper_value_series.clear()
         st.rerun()
 
 df, portfolio_value_series = fetch_prices(HOLDINGS)
@@ -528,57 +585,60 @@ def render_holdings_tab():
         if "pv_timeframe" not in st.session_state:
             st.session_state.pv_timeframe = "1M"
 
-        st.markdown('<div class="card-alt" style="padding-bottom:12px;">', unsafe_allow_html=True)
+        pv_col, _pv_spacer = st.columns([2, 1], gap="medium")
 
-        with st.container(key="pv_timeframe"):
-            tf_cols = st.columns([1.3] + [0.55] * len(TIMEFRAMES) + [0.9] + [3])
-            tf_cols[0].markdown("<span style='font-size:14px;font-weight:600;padding-top:2px;display:block'>Portfolio value</span>", unsafe_allow_html=True)
-            for i, (label, _) in enumerate(TIMEFRAMES):
-                if tf_cols[i + 1].button(label, key=f"tf_{label}"):
-                    st.session_state.pv_timeframe = label
-            if tf_cols[len(TIMEFRAMES) + 1].button("Custom", key="tf_Custom"):
-                st.session_state.pv_timeframe = "Custom"
+        with pv_col:
+            st.markdown('<div class="card-alt" style="padding-bottom:12px;">', unsafe_allow_html=True)
 
-        if st.session_state.pv_timeframe == "Custom":
-            max_days = max((portfolio_value_series.index.max() - portfolio_value_series.index.min()).days, 1)
-            custom_days = st.slider("Custom lookback (days)", 1, max_days, min(30, max_days), key="pv_custom_days", label_visibility="collapsed")
-            lookback_days = custom_days
-        else:
-            lookback_days = dict(TIMEFRAMES)[st.session_state.pv_timeframe]
+            with st.container(key="pv_timeframe"):
+                tf_cols = st.columns([1.3] + [0.55] * len(TIMEFRAMES) + [0.9] + [3])
+                tf_cols[0].markdown("<span style='font-size:14px;font-weight:600;padding-top:2px;display:block'>Portfolio value</span>", unsafe_allow_html=True)
+                for i, (label, _) in enumerate(TIMEFRAMES):
+                    if tf_cols[i + 1].button(label, key=f"tf_{label}"):
+                        st.session_state.pv_timeframe = label
+                if tf_cols[len(TIMEFRAMES) + 1].button("Custom", key="tf_Custom"):
+                    st.session_state.pv_timeframe = "Custom"
 
-        if lookback_days is None:
-            pv_view = portfolio_value_series
-        else:
-            cutoff = portfolio_value_series.index.max() - pd.Timedelta(days=lookback_days)
-            pv_view = portfolio_value_series[portfolio_value_series.index >= cutoff]
-            if len(pv_view) < 2:
-                pv_view = portfolio_value_series.tail(2)
+            if st.session_state.pv_timeframe == "Custom":
+                max_days = max((portfolio_value_series.index.max() - portfolio_value_series.index.min()).days, 1)
+                custom_days = st.slider("Custom lookback (days)", 1, max_days, min(30, max_days), key="pv_custom_days", label_visibility="collapsed")
+                lookback_days = custom_days
+            else:
+                lookback_days = dict(TIMEFRAMES)[st.session_state.pv_timeframe]
 
-        pv_start = pv_view.iloc[0]
-        pv_end = pv_view.iloc[-1]
-        pv_pct = (pv_end - pv_start) / pv_start * 100 if pv_start else 0
-        pv_color = GREEN if pv_pct >= 0 else RED
+            if lookback_days is None:
+                pv_view = portfolio_value_series
+            else:
+                cutoff = portfolio_value_series.index.max() - pd.Timedelta(days=lookback_days)
+                pv_view = portfolio_value_series[portfolio_value_series.index >= cutoff]
+                if len(pv_view) < 2:
+                    pv_view = portfolio_value_series.tail(2)
 
-        fig_pv = go.Figure(go.Scatter(
-            x=pv_view.index, y=pv_view.values,
-            mode="lines", line=dict(color=pv_color, width=2),
-            fill="tozeroy", fillcolor=pv_color + "22",
-        ))
-        fig_pv.update_layout(
-            height=100, margin=dict(l=0, r=0, t=0, b=0),
-            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-            xaxis=dict(visible=False), yaxis=dict(visible=False),
-        )
+            pv_start = pv_view.iloc[0]
+            pv_end = pv_view.iloc[-1]
+            pv_pct = (pv_end - pv_start) / pv_start * 100 if pv_start else 0
+            pv_color = GREEN if pv_pct >= 0 else RED
 
-        label_txt = st.session_state.pv_timeframe if st.session_state.pv_timeframe != "Custom" else f"last {lookback_days}d"
-        st.markdown(
-            f"<div style='display:flex;justify-content:space-between;align-items:baseline;margin:4px 0'>"
-            f"<span style='font-size:12.5px;color:{MUTED}'>{label_txt} · {len(pv_view)} sessions</span>"
-            f"<span class='num' style='font-size:12.5px;font-weight:600;color:{pv_color}'>{pv_pct:+.1f}% over period</span></div>",
-            unsafe_allow_html=True,
-        )
-        st.plotly_chart(fig_pv, use_container_width=True, config={"displayModeBar": False})
-        st.markdown('</div>', unsafe_allow_html=True)
+            fig_pv = go.Figure(go.Scatter(
+                x=pv_view.index, y=pv_view.values,
+                mode="lines", line=dict(color=pv_color, width=2),
+                fill="tozeroy", fillcolor=pv_color + "22",
+            ))
+            fig_pv.update_layout(
+                height=100, margin=dict(l=0, r=0, t=0, b=0),
+                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(visible=False), yaxis=dict(visible=False),
+            )
+
+            label_txt = st.session_state.pv_timeframe if st.session_state.pv_timeframe != "Custom" else f"last {lookback_days}d"
+            st.markdown(
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline;margin:4px 0'>"
+                f"<span style='font-size:12.5px;color:{MUTED}'>{label_txt} · {len(pv_view)} sessions</span>"
+                f"<span class='num' style='font-size:12.5px;font-weight:600;color:{pv_color}'>{pv_pct:+.1f}% over period</span></div>",
+                unsafe_allow_html=True,
+            )
+            st.plotly_chart(fig_pv, use_container_width=True, config={"displayModeBar": False})
+            st.markdown('</div>', unsafe_allow_html=True)
 
     # -------------------------------------------------------------------
     # Summary cards
@@ -1224,6 +1284,86 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
     # LEFT: metrics, open positions, trade history — always visible
     # ======================================================================
     with col_main:
+        # -- Returns chart — with timeframe / custom date-range filter ------
+        trade_records = tuple(
+            (row["Timestamp"].isoformat(), row["Symbol"], row["Side"], float(row["Qty"]), float(row["Price"]))
+            for _, row in trades[trades["Portfolio"] == active_portfolio].sort_values("Timestamp").iterrows()
+        ) if not trades.empty else tuple()
+
+        pp_value_series = fetch_paper_value_series(trade_records, starting_cash) if trade_records else None
+
+        if pp_value_series is not None and len(pp_value_series) > 1:
+            PP_TIMEFRAMES = [("1W", 7), ("2W", 14), ("1M", 30), ("3M", 90), ("6M", 180), ("1Y", 365), ("All", None)]
+            pp_tf_key = f"pp_timeframe_{active_portfolio}"
+            pp_custom_key = f"pp_custom_days_{active_portfolio}"
+            if pp_tf_key not in st.session_state:
+                st.session_state[pp_tf_key] = "1M"
+
+            st.markdown('<div class="card-alt" style="padding-bottom:12px;">', unsafe_allow_html=True)
+
+            with st.container(key=f"pp_pv_timeframe_{active_portfolio}"):
+                tf_cols = st.columns([1.3] + [0.55] * len(PP_TIMEFRAMES) + [0.9] + [1])
+                tf_cols[0].markdown("<span style='font-size:14px;font-weight:600;padding-top:2px;display:block'>Returns</span>", unsafe_allow_html=True)
+                for i, (label, _) in enumerate(PP_TIMEFRAMES):
+                    if tf_cols[i + 1].button(label, key=f"pp_tf_{active_portfolio}_{label}"):
+                        st.session_state[pp_tf_key] = label
+                if tf_cols[len(PP_TIMEFRAMES) + 1].button("Custom", key=f"pp_tf_{active_portfolio}_Custom"):
+                    st.session_state[pp_tf_key] = "Custom"
+
+            if st.session_state[pp_tf_key] == "Custom":
+                min_date = pp_value_series.index.min().date()
+                max_date = pp_value_series.index.max().date()
+                date_range = st.date_input(
+                    "Custom date range", value=(min_date, max_date),
+                    min_value=min_date, max_value=max_date,
+                    key=pp_custom_key, label_visibility="collapsed",
+                )
+                if isinstance(date_range, tuple) and len(date_range) == 2:
+                    d_start, d_end = date_range
+                else:
+                    d_start, d_end = min_date, max_date
+                pp_view = pp_value_series[
+                    (pp_value_series.index.date >= d_start) & (pp_value_series.index.date <= d_end)
+                ]
+                if len(pp_view) < 2:
+                    pp_view = pp_value_series.tail(2)
+                pp_label_txt = f"{d_start} → {d_end}"
+            else:
+                lookback = dict(PP_TIMEFRAMES)[st.session_state[pp_tf_key]]
+                if lookback is None:
+                    pp_view = pp_value_series
+                else:
+                    cutoff = pp_value_series.index.max() - pd.Timedelta(days=lookback)
+                    pp_view = pp_value_series[pp_value_series.index >= cutoff]
+                    if len(pp_view) < 2:
+                        pp_view = pp_value_series.tail(2)
+                pp_label_txt = f"{st.session_state[pp_tf_key]} · {len(pp_view)} sessions"
+
+            pp_start_val, pp_end_val = pp_view.iloc[0], pp_view.iloc[-1]
+            pp_pct = (pp_end_val - pp_start_val) / pp_start_val * 100 if pp_start_val else 0
+            pp_color = GREEN if pp_pct >= 0 else RED
+
+            fig_pp = go.Figure(go.Scatter(
+                x=pp_view.index, y=pp_view.values,
+                mode="lines", line=dict(color=pp_color, width=2),
+                fill="tozeroy", fillcolor=pp_color + "22",
+            ))
+            fig_pp.update_layout(
+                height=100, margin=dict(l=0, r=0, t=0, b=0),
+                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(visible=False), yaxis=dict(visible=False),
+            )
+            st.markdown(
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline;margin:4px 0'>"
+                f"<span style='font-size:12.5px;color:{MUTED}'>{pp_label_txt}</span>"
+                f"<span class='num' style='font-size:12.5px;font-weight:600;color:{pp_color}'>{pp_pct:+.1f}% over period</span></div>",
+                unsafe_allow_html=True,
+            )
+            st.plotly_chart(fig_pp, use_container_width=True, config={"displayModeBar": False})
+            st.markdown('</div>', unsafe_allow_html=True)
+        elif not trades.empty:
+            st.caption("Not enough trade history yet to chart returns for this portfolio.")
+
         with st.container(key=f"pp_metrics_{active_portfolio}"):
             st.caption(f"\"{active_portfolio}\" — practice with virtual money, trades execute at the live CMP, no real capital involved.")
 
