@@ -1278,9 +1278,9 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
             )
 
             st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
-            pos_cols = [1.4, 0.7, 0.85, 0.85, 0.85, 0.85, 0.85, 0.85, 0.5, 0.5]
+            pos_cols = [1.5, 0.7, 0.85, 0.95, 0.85, 0.85, 0.85, 0.85, 0.5, 0.5]
             pcols = st.columns(pos_cols)
-            for h, label in zip(pcols, ["STOCK", "QTY", "BUY PRICE", "CMP", "P&L %", "BELOW EMA20", "BELOW EMA50", "DEAD CROSS", "", ""]):
+            for h, label in zip(pcols, ["STOCK", "QTY", "CMP", "VALUE", "P&L %", "BELOW EMA20", "BELOW EMA50", "DEAD CROSS", "", ""]):
                 h.markdown(f"<span style='font-size:12px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
 
             for sym in open_symbols:
@@ -1297,11 +1297,17 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
                 else:
                     below20_str = below50_str = dead_cross_str = "—"
 
+                position_value = pos['qty'] * cmp
+
                 pc = st.columns(pos_cols)
-                pc[0].markdown(f"<div style='padding-top:6px;font-weight:600'>{sym}</div>", unsafe_allow_html=True)
+                pc[0].markdown(
+                    f"<div style='padding-top:4px;font-weight:600'>{sym}</div>"
+                    f"<div class='num' style='font-size:12px;color:{MUTED}'>Buy ₹{pos['avg']:.2f}</div>",
+                    unsafe_allow_html=True,
+                )
                 pc[1].markdown(f"<div class='num' style='padding-top:6px'>{pos['qty']}</div>", unsafe_allow_html=True)
-                pc[2].markdown(f"<div class='num' style='padding-top:6px'>₹{pos['avg']:.2f}</div>", unsafe_allow_html=True)
-                pc[3].markdown(f"<div class='num' style='padding-top:6px'>₹{cmp:.2f}</div>", unsafe_allow_html=True)
+                pc[2].markdown(f"<div class='num' style='padding-top:6px'>₹{cmp:.2f}</div>", unsafe_allow_html=True)
+                pc[3].markdown(f"<div class='num' style='padding-top:6px;font-weight:600'>₹{position_value:,.2f}</div>", unsafe_allow_html=True)
                 pc[4].markdown(f"<div class='num' style='padding-top:6px;color:{pnl_color};font-weight:600'>{pnl_pct:+.1f}%</div>", unsafe_allow_html=True)
                 pc[5].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{below20_str}</div>", unsafe_allow_html=True)
                 pc[6].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{below50_str}</div>", unsafe_allow_html=True)
