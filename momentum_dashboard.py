@@ -117,6 +117,8 @@ st.markdown(f"""
     .st-key-holdings_rows [data-testid="column"] {{ padding-top: 0; padding-bottom: 0; }}
 
     .st-key-sort_pills div.stButton > button,
+    [class*="st-key-wl_sort_pills"] div.stButton > button,
+    [class*="st-key-pp_sort_pills"] div.stButton > button,
     .st-key-pv_timeframe div.stButton > button {{
         border-radius: 999px !important; height: 27px; padding: 0 13px !important;
         font-size: 12.5px !important; font-weight: 600 !important;
@@ -125,9 +127,15 @@ st.markdown(f"""
         white-space: nowrap !important; overflow: visible !important;
     }}
     .st-key-sort_pills div.stButton > button:hover,
+    [class*="st-key-wl_sort_pills"] div.stButton > button:hover,
+    [class*="st-key-pp_sort_pills"] div.stButton > button:hover,
     .st-key-pv_timeframe div.stButton > button:hover {{ background: {CARD_ALT} !important; }}
-    .st-key-sort_pills div[data-testid="stHorizontalBlock"] {{ gap: 6px !important; align-items: center !important; }}
-    .st-key-sort_pills [data-testid="column"] {{ width: fit-content !important; flex: none !important; min-width: fit-content !important; }}
+    .st-key-sort_pills div[data-testid="stHorizontalBlock"],
+    [class*="st-key-wl_sort_pills"] div[data-testid="stHorizontalBlock"],
+    [class*="st-key-pp_sort_pills"] div[data-testid="stHorizontalBlock"] {{ gap: 6px !important; align-items: center !important; }}
+    .st-key-sort_pills [data-testid="column"],
+    [class*="st-key-wl_sort_pills"] [data-testid="column"],
+    [class*="st-key-pp_sort_pills"] [data-testid="column"] {{ width: fit-content !important; flex: none !important; min-width: fit-content !important; }}
 
     .card {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px; padding: 20px 22px; margin-bottom: 6px; }}
     .card-alt {{ background: {CARD_ALT}; border: 1px solid {BORDER}; border-radius: 10px; padding: 20px 22px; margin-bottom: 6px; }}
@@ -963,6 +971,39 @@ def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, 
         wl_detail = fetch_watchlist_detail(tuple(wl_symbols))
         wl_technicals = fetch_technicals(tuple(wl_symbols))
 
+        for wrow in stocks:
+            d = wl_detail.get(wrow["Symbol"], {})
+            wrow["_day_pct"] = d.get("day_pct")
+            wrow["_volume"] = d.get("volume")
+
+        wl_sort_key_name = f"wl_sort_key_{active_name}"
+        wl_sort_dir_name = f"wl_sort_dir_{active_name}"
+        if wl_sort_key_name not in st.session_state:
+            st.session_state[wl_sort_key_name], st.session_state[wl_sort_dir_name] = "Rank", "asc"
+
+        WL_SORT_OPTIONS = [("Rank", "Rank"), ("Symbol", "Symbol"), ("1D %", "_day_pct"), ("Volume", "_volume")]
+
+        with st.container(key=f"wl_sort_pills_{active_name}"):
+            sp_cols = st.columns([0.5, 0.75, 0.95, 0.75, 0.9, 3.5])
+            sp_cols[0].markdown(f"<span style='font-size:12px;font-weight:600;color:{MUTED};text-transform:uppercase;padding-top:4px;display:block'>Sort</span>", unsafe_allow_html=True)
+            for i, (label, col) in enumerate(WL_SORT_OPTIONS):
+                active = st.session_state[wl_sort_key_name] == col
+                arrow = ("↑" if st.session_state[wl_sort_dir_name] == "asc" else "↓") if active else ""
+                if sp_cols[i + 1].button(f"{label} {arrow}".strip(), key=f"wl_sortpill_{active_name}_{col}"):
+                    if active:
+                        st.session_state[wl_sort_dir_name] = "desc" if st.session_state[wl_sort_dir_name] == "asc" else "asc"
+                    else:
+                        st.session_state[wl_sort_key_name] = col
+                        st.session_state[wl_sort_dir_name] = "asc" if col in ("Rank", "Symbol") else "desc"
+
+        _wl_sort_col = st.session_state[wl_sort_key_name]
+        _wl_reverse = st.session_state[wl_sort_dir_name] == "desc"
+        stocks = sorted(
+            stocks,
+            key=lambda s: (s.get(_wl_sort_col) is None, s.get(_wl_sort_col) if s.get(_wl_sort_col) is not None else 0),
+            reverse=_wl_reverse,
+        )
+
         linked_portfolio = active_wl.get("linked_portfolio")
         session_active_portfolio = st.session_state.get("active_portfolio")
         if linked_portfolio in portfolio_names:
@@ -1200,6 +1241,41 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
             st.caption("No open positions yet — place a trade on the right or from a linked Watchlist.")
         else:
             technicals = fetch_technicals(tuple(open_symbols))
+
+            _pos_sort_metrics = {}
+            for sym in open_symbols:
+                pos = positions[sym]
+                cmp = live_prices.get(sym) or pos["avg"]
+                pnl_pct = ((cmp - pos["avg"]) / pos["avg"] * 100) if pos["avg"] else 0
+                _pos_sort_metrics[sym] = {"Stock": sym, "Qty": pos["qty"], "Buy Price": pos["avg"], "CMP": cmp, "P&L %": pnl_pct}
+
+            pp_sort_key_name = f"pp_sort_key_{active_portfolio}"
+            pp_sort_dir_name = f"pp_sort_dir_{active_portfolio}"
+            if pp_sort_key_name not in st.session_state:
+                st.session_state[pp_sort_key_name], st.session_state[pp_sort_dir_name] = "Stock", "asc"
+
+            PP_SORT_OPTIONS = [("Stock", "Stock"), ("Qty", "Qty"), ("Buy Price", "Buy Price"), ("CMP", "CMP"), ("P&L %", "P&L %")]
+
+            with st.container(key=f"pp_sort_pills_{active_portfolio}"):
+                sp_cols = st.columns([0.5, 0.75, 0.6, 0.95, 0.7, 0.8, 3])
+                sp_cols[0].markdown(f"<span style='font-size:12px;font-weight:600;color:{MUTED};text-transform:uppercase;padding-top:4px;display:block'>Sort</span>", unsafe_allow_html=True)
+                for i, (label, col) in enumerate(PP_SORT_OPTIONS):
+                    active = st.session_state[pp_sort_key_name] == col
+                    arrow = ("↑" if st.session_state[pp_sort_dir_name] == "asc" else "↓") if active else ""
+                    if sp_cols[i + 1].button(f"{label} {arrow}".strip(), key=f"pp_sortpill_{active_portfolio}_{col}"):
+                        if active:
+                            st.session_state[pp_sort_dir_name] = "desc" if st.session_state[pp_sort_dir_name] == "asc" else "asc"
+                        else:
+                            st.session_state[pp_sort_key_name] = col
+                            st.session_state[pp_sort_dir_name] = "asc" if col == "Stock" else "desc"
+
+            _pp_sort_col = st.session_state[pp_sort_key_name]
+            _pp_reverse = st.session_state[pp_sort_dir_name] == "desc"
+            open_symbols = sorted(
+                open_symbols,
+                key=lambda s: _pos_sort_metrics[s][_pp_sort_col],
+                reverse=_pp_reverse,
+            )
 
             st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
             pos_cols = [1.4, 0.7, 0.85, 0.85, 0.85, 0.85, 0.85, 0.85, 0.5, 0.5]
