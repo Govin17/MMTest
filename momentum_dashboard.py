@@ -873,23 +873,39 @@ def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, 
 
                 if src_df is not None:
                     cols = src_df.columns.tolist()
+                    PRICE_WORDS = ("price", "ltp", "close", "cmp", "open", "high", "low", "value")
                     guess_symbol = next((c for c in cols if "symbol" in c.lower() or "stock" in c.lower()), cols[0])
-                    guess_score = next((c for c in cols if "rank" in c.lower() or "perform" in c.lower() or "return" in c.lower() or "score" in c.lower()), cols[-1])
+                    guess_score_candidates = [
+                        c for c in cols
+                        if ("rank" in c.lower() or "perform" in c.lower() or "return" in c.lower() or "score" in c.lower())
+                        and not any(w in c.lower() for w in PRICE_WORDS)
+                    ]
+                    score_options = ["— none (just add symbols) —"] + cols
+                    guess_score = guess_score_candidates[0] if guess_score_candidates else score_options[0]
 
                     symbol_col = st.selectbox("Symbol column", cols, index=cols.index(guess_symbol), key=f"symcol_{active_name}")
-                    score_col = st.selectbox("Rank / score column", cols, index=cols.index(guess_score), key=f"scorecol_{active_name}")
+                    score_col_choice = st.selectbox(
+                        "Rank / score column (never price — live price is always fetched separately)",
+                        score_options, index=score_options.index(guess_score), key=f"scorecol_{active_name}",
+                    )
                     n_top = st.slider("Top N to add", 1, min(30, len(src_df)), min(10, len(src_df)), key=f"ntop_{active_name}")
 
                     if st.button(f"Build \"{active_name}\"", key=f"build_{active_name}", use_container_width=True):
-                        ranked = src_df[[symbol_col, score_col]].dropna()
-                        ranked.columns = ["Symbol", "Score"]
+                        if score_col_choice == score_options[0]:
+                            ranked = src_df[[symbol_col]].dropna().copy()
+                            ranked.columns = ["Symbol"]
+                            ranked["Score"] = 0.0
+                            ranked = ranked.head(n_top).reset_index(drop=True)
+                        else:
+                            ranked = src_df[[symbol_col, score_col_choice]].dropna()
+                            ranked.columns = ["Symbol", "Score"]
+                            ranked = ranked.sort_values("Score", ascending=False).head(n_top).reset_index(drop=True)
                         ranked["Symbol"] = ranked["Symbol"].astype(str).str.upper().str.strip()
-                        ranked = ranked.sort_values("Score", ascending=False).head(n_top).reset_index(drop=True)
                         ranked.insert(0, "Rank", ranked.index + 1)
                         active_wl["stocks"] = ranked.to_dict("records")
                         watchlists[active_name] = active_wl
                         save_watchlists(watchlists)
-                        st.success(f"\"{active_name}\" saved — top {len(ranked)} stocks.")
+                        st.success(f"\"{active_name}\" saved — top {len(ranked)} stocks. Prices are always fetched live.")
                         st.rerun()
 
         with manual_tab:
