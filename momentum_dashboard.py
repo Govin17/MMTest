@@ -204,7 +204,8 @@ st.markdown(f"""
     /* Card-styled containers (st.container(key=...)) — avoids the empty-bar
        bug that literal <div>...</div> markdown pairs cause around widgets */
     .st-key-pp_selector, .st-key-pp_create, [class*="st-key-pp_trade_ticket_"],
-    [class*="st-key-pp_delete_"], .st-key-wl_create_row, .st-key-pp_create_row {{
+    [class*="st-key-pp_delete_"], .st-key-wl_create_row, .st-key-pp_create_row,
+    [class*="st-key-pp_create_row_"] {{
         background: {CARD_UPLOAD}; border: 1px solid {BORDER}; border-radius: 10px;
         padding: 18px 20px; margin-bottom: 10px;
     }}
@@ -402,10 +403,17 @@ def fetch_paper_value_series(trades_records, starting_cash):
         return None
 
     combined = pd.DataFrame(price_series).sort_index().ffill()
-    first_trade_date = pd.Timestamp(trades_records[0][0]).normalize()
-    combined = combined[combined.index >= first_trade_date]
     if combined.empty:
         return None
+    first_trade_date = pd.Timestamp(trades_records[0][0]).normalize()
+    # Guard against the first trade being newer than the latest available close
+    # (e.g. traded today but the market hasn't printed today's close yet) —
+    # in that case fall back to whatever data we do have instead of filtering
+    # everything out.
+    cutoff = min(first_trade_date, combined.index.max())
+    combined = combined[combined.index >= cutoff]
+    if combined.empty:
+        combined = pd.DataFrame(price_series).sort_index().ffill().tail(1)
 
     norm_trades = [(pd.Timestamp(ts).normalize(), sym, side, qty, price) for ts, sym, side, qty, price in trades_records]
 
@@ -600,19 +608,33 @@ def render_holdings_tab():
                     st.session_state.pv_timeframe = "Custom"
 
             if st.session_state.pv_timeframe == "Custom":
-                max_days = max((portfolio_value_series.index.max() - portfolio_value_series.index.min()).days, 1)
-                custom_days = st.slider("Custom lookback (days)", 1, max_days, min(30, max_days), key="pv_custom_days", label_visibility="collapsed")
-                lookback_days = custom_days
-            else:
-                lookback_days = dict(TIMEFRAMES)[st.session_state.pv_timeframe]
-
-            if lookback_days is None:
-                pv_view = portfolio_value_series
-            else:
-                cutoff = portfolio_value_series.index.max() - pd.Timedelta(days=lookback_days)
-                pv_view = portfolio_value_series[portfolio_value_series.index >= cutoff]
+                min_date = portfolio_value_series.index.min().date()
+                max_date = portfolio_value_series.index.max().date()
+                date_range = st.date_input(
+                    "Custom date range", value=(min_date, max_date),
+                    min_value=min_date, max_value=max_date,
+                    key="pv_custom_range", label_visibility="collapsed",
+                )
+                if isinstance(date_range, tuple) and len(date_range) == 2:
+                    d_start, d_end = date_range
+                else:
+                    d_start, d_end = min_date, max_date
+                pv_view = portfolio_value_series[
+                    (portfolio_value_series.index.date >= d_start) & (portfolio_value_series.index.date <= d_end)
+                ]
                 if len(pv_view) < 2:
                     pv_view = portfolio_value_series.tail(2)
+                label_txt = f"{d_start} → {d_end}"
+            else:
+                lookback_days = dict(TIMEFRAMES)[st.session_state.pv_timeframe]
+                if lookback_days is None:
+                    pv_view = portfolio_value_series
+                else:
+                    cutoff = portfolio_value_series.index.max() - pd.Timedelta(days=lookback_days)
+                    pv_view = portfolio_value_series[portfolio_value_series.index >= cutoff]
+                    if len(pv_view) < 2:
+                        pv_view = portfolio_value_series.tail(2)
+                label_txt = f"{st.session_state.pv_timeframe} · {len(pv_view)} sessions"
 
             pv_start = pv_view.iloc[0]
             pv_end = pv_view.iloc[-1]
@@ -630,10 +652,9 @@ def render_holdings_tab():
                 xaxis=dict(visible=False), yaxis=dict(visible=False),
             )
 
-            label_txt = st.session_state.pv_timeframe if st.session_state.pv_timeframe != "Custom" else f"last {lookback_days}d"
             st.markdown(
                 f"<div style='display:flex;justify-content:space-between;align-items:baseline;margin:4px 0'>"
-                f"<span style='font-size:12.5px;color:{MUTED}'>{label_txt} · {len(pv_view)} sessions</span>"
+                f"<span style='font-size:12.5px;color:{MUTED}'>{label_txt}</span>"
                 f"<span class='num' style='font-size:12.5px;font-weight:600;color:{pv_color}'>{pv_pct:+.1f}% over period</span></div>",
                 unsafe_allow_html=True,
             )
@@ -1187,20 +1208,6 @@ def render_paper_trading_tab():
     portfolios = load_portfolios()
     names = list(portfolios.keys())
 
-    # -- Create a new portfolio (compact row above the tabs) --------------
-    with st.container(key="pp_create_row"):
-        cr1, cr2, cr3 = st.columns([3, 1.3, 1])
-        new_port_name = cr1.text_input("New portfolio name", key="new_port_name", placeholder="e.g. Aggressive Momentum", label_visibility="collapsed")
-        new_port_cash = cr2.number_input("Starting cash", min_value=1000.0, value=100000.0, step=5000.0, key="new_port_cash")
-        if cr3.button("➕ New portfolio", use_container_width=True) and new_port_name.strip():
-            if new_port_name.strip() not in portfolios:
-                portfolios[new_port_name.strip()] = {"starting_cash": new_port_cash}
-                save_portfolios(portfolios)
-                st.session_state.active_portfolio = new_port_name.strip()
-                st.rerun()
-            else:
-                st.warning("A portfolio with that name already exists.")
-
     # -- Browse between portfolios via tabs at the top ---------------------
     tabs = st.tabs(names)
     for tab, name in zip(tabs, names):
@@ -1217,6 +1224,19 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
     # RIGHT: delete + trade ticket
     # ======================================================================
     with col_tools:
+        with st.container(key=f"pp_create_row_{active_portfolio}"):
+            st.markdown("<div style='font-size:13px;font-weight:600;margin-bottom:8px'>➕ New portfolio</div>", unsafe_allow_html=True)
+            new_port_name = st.text_input("New portfolio name", key=f"new_port_name_{active_portfolio}", placeholder="e.g. Aggressive Momentum", label_visibility="collapsed")
+            new_port_cash = st.number_input("Starting cash", min_value=1000.0, value=100000.0, step=5000.0, key=f"new_port_cash_{active_portfolio}")
+            if st.button("Create portfolio", key=f"create_port_btn_{active_portfolio}", use_container_width=True) and new_port_name.strip():
+                if new_port_name.strip() not in portfolios:
+                    portfolios[new_port_name.strip()] = {"starting_cash": new_port_cash}
+                    save_portfolios(portfolios)
+                    st.session_state.active_portfolio = new_port_name.strip()
+                    st.rerun()
+                else:
+                    st.warning("A portfolio with that name already exists.")
+
         if len(portfolio_names) > 1:
             with st.container(key=f"pp_delete_{active_portfolio}"):
                 if st.button(f"🗑️ Delete \"{active_portfolio}\"", key=f"del_portfolio_{active_portfolio}", use_container_width=True):
