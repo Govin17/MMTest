@@ -971,20 +971,40 @@ def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, 
         wl_detail = fetch_watchlist_detail(tuple(wl_symbols))
         wl_technicals = fetch_technicals(tuple(wl_symbols))
 
+        linked_portfolio = active_wl.get("linked_portfolio")
+        session_active_portfolio = st.session_state.get("active_portfolio")
+        if linked_portfolio in portfolio_names:
+            trade_portfolio = linked_portfolio
+        elif session_active_portfolio in portfolio_names:
+            trade_portfolio = session_active_portfolio
+        elif portfolio_names:
+            trade_portfolio = portfolio_names[0]
+        else:
+            trade_portfolio = None
+
+        trades = load_paper_trades()
+        if trade_portfolio:
+            positions, cash, _ = compute_paper_positions(trades, trade_portfolio, portfolios[trade_portfolio]["starting_cash"])
+        else:
+            positions, cash = {}, 0
+
         for wrow in stocks:
             d = wl_detail.get(wrow["Symbol"], {})
             wrow["_day_pct"] = d.get("day_pct")
             wrow["_volume"] = d.get("volume")
+            _cmp = d.get("cmp")
+            _held_qty = positions.get(wrow["Symbol"], {"qty": 0})["qty"]
+            wrow["_value"] = (_held_qty * _cmp) if (_cmp is not None) else None
 
         wl_sort_key_name = f"wl_sort_key_{active_name}"
         wl_sort_dir_name = f"wl_sort_dir_{active_name}"
         if wl_sort_key_name not in st.session_state:
             st.session_state[wl_sort_key_name], st.session_state[wl_sort_dir_name] = "Rank", "asc"
 
-        WL_SORT_OPTIONS = [("Rank", "Rank"), ("Symbol", "Symbol"), ("1D %", "_day_pct"), ("Volume", "_volume")]
+        WL_SORT_OPTIONS = [("Rank", "Rank"), ("Symbol", "Symbol"), ("1D %", "_day_pct"), ("Volume", "_volume"), ("Value", "_value")]
 
         with st.container(key=f"wl_sort_pills_{active_name}"):
-            sp_cols = st.columns([0.5, 0.75, 0.95, 0.75, 0.9, 3.5])
+            sp_cols = st.columns([0.5, 0.75, 0.95, 0.75, 0.9, 0.75, 2.75])
             sp_cols[0].markdown(f"<span style='font-size:12px;font-weight:600;color:{MUTED};text-transform:uppercase;padding-top:4px;display:block'>Sort</span>", unsafe_allow_html=True)
             for i, (label, col) in enumerate(WL_SORT_OPTIONS):
                 active = st.session_state[wl_sort_key_name] == col
@@ -1003,23 +1023,6 @@ def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, 
             key=lambda s: (s.get(_wl_sort_col) is None, s.get(_wl_sort_col) if s.get(_wl_sort_col) is not None else 0),
             reverse=_wl_reverse,
         )
-
-        linked_portfolio = active_wl.get("linked_portfolio")
-        session_active_portfolio = st.session_state.get("active_portfolio")
-        if linked_portfolio in portfolio_names:
-            trade_portfolio = linked_portfolio
-        elif session_active_portfolio in portfolio_names:
-            trade_portfolio = session_active_portfolio
-        elif portfolio_names:
-            trade_portfolio = portfolio_names[0]
-        else:
-            trade_portfolio = None
-
-        trades = load_paper_trades()
-        if trade_portfolio:
-            positions, cash, _ = compute_paper_positions(trades, trade_portfolio, portfolios[trade_portfolio]["starting_cash"])
-        else:
-            positions, cash = {}, 0
 
         if trade_portfolio:
             st.caption(f"Buy/Sell below trade the **{trade_portfolio}** paper portfolio.")
@@ -1247,14 +1250,17 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
                 pos = positions[sym]
                 cmp = live_prices.get(sym) or pos["avg"]
                 pnl_pct = ((cmp - pos["avg"]) / pos["avg"] * 100) if pos["avg"] else 0
-                _pos_sort_metrics[sym] = {"Stock": sym, "Qty": pos["qty"], "Buy Price": pos["avg"], "CMP": cmp, "P&L %": pnl_pct}
+                _pos_sort_metrics[sym] = {
+                    "Stock": sym, "Qty": pos["qty"], "Buy Price": pos["avg"], "CMP": cmp,
+                    "Value": pos["qty"] * cmp, "P&L %": pnl_pct,
+                }
 
             pp_sort_key_name = f"pp_sort_key_{active_portfolio}"
             pp_sort_dir_name = f"pp_sort_dir_{active_portfolio}"
             if pp_sort_key_name not in st.session_state:
                 st.session_state[pp_sort_key_name], st.session_state[pp_sort_dir_name] = "Stock", "asc"
 
-            PP_SORT_OPTIONS = [("Stock", "Stock"), ("Qty", "Qty"), ("Buy Price", "Buy Price"), ("CMP", "CMP"), ("P&L %", "P&L %")]
+            PP_SORT_OPTIONS = [("Stock", "Stock"), ("Qty", "Qty"), ("CMP", "CMP"), ("Value", "Value"), ("P&L %", "P&L %")]
 
             with st.container(key=f"pp_sort_pills_{active_portfolio}"):
                 sp_cols = st.columns([0.5, 0.75, 0.6, 0.95, 0.7, 0.8, 3])
