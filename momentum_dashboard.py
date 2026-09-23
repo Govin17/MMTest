@@ -227,7 +227,7 @@ HOLDINGS = [
 ]
 
 
-@st.cache_data(ttl=20)
+@st.cache_data(ttl=5)
 def fetch_prices(holdings):
     rows = []
     price_series = {}   # ticker -> Series of Close, indexed by date (up to 1y)
@@ -297,7 +297,7 @@ def fetch_prices(holdings):
     return pd.DataFrame(rows), portfolio_value_series
 
 
-@st.cache_data(ttl=45)
+@st.cache_data(ttl=5)
 def fetch_watchlist_prices(symbols):
     out = {}
     for sym in symbols:
@@ -310,7 +310,7 @@ def fetch_watchlist_prices(symbols):
     return out
 
 
-@st.cache_data(ttl=45)
+@st.cache_data(ttl=5)
 def fetch_watchlist_detail(symbols):
     """Richer per-symbol data for the watchlist table: cmp, day change, volume, sparkline."""
     out = {}
@@ -366,7 +366,7 @@ def avatar_html(symbol, size=34):
     )
 
 
-@st.cache_data(ttl=45)
+@st.cache_data(ttl=5)
 def fetch_technicals(symbols):
     """EMA20/EMA50 for arbitrary NSE symbols (used by paper portfolios)."""
     out = {}
@@ -487,9 +487,12 @@ with c1:
     )
     st.caption(f"Last refreshed: {datetime.now().strftime('%d %b %Y, %H:%M:%S')}")
     if AUTOREFRESH_AVAILABLE:
-        auto_on = st.toggle("Auto-refresh every 30s", value=False, key="auto_refresh_toggle")
+        ar1, ar2 = st.columns([1.3, 1])
+        auto_on = ar1.toggle("Auto-refresh", value=False, key="auto_refresh_toggle")
+        interval_s = ar2.selectbox("Every", [5, 10, 15, 30, 60], index=0, key="auto_refresh_interval", label_visibility="collapsed", format_func=lambda s: f"{s}s")
         if auto_on:
-            st_autorefresh(interval=30_000, key="auto_refresh_timer")
+            st_autorefresh(interval=interval_s * 1000, key="auto_refresh_timer")
+            st.caption(f"⚠️ Polling Yahoo Finance every {interval_s}s can get rate-limited — if prices start showing blank, switch to a slower interval.")
     else:
         st.caption("Tip: `pip3 install streamlit-autorefresh` to enable auto-refresh.")
 with c2:
