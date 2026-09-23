@@ -1284,9 +1284,9 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
             )
 
             st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
-            pos_cols = [1.5, 0.7, 0.85, 0.95, 0.85, 0.85, 0.85, 0.85, 0.5, 0.5]
+            pos_cols = [1.7, 0.7, 0.85, 0.95, 0.85, 0.85, 0.85, 0.5, 0.5]
             pcols = st.columns(pos_cols)
-            for h, label in zip(pcols, ["STOCK", "QTY", "CMP", "VALUE", "P&L %", "BELOW EMA20", "BELOW EMA50", "DEAD CROSS", "", ""]):
+            for h, label in zip(pcols, ["STOCK", "QTY", "CMP", "VALUE", "P&L %", "BELOW EMA20", "BELOW EMA50", "", ""]):
                 h.markdown(f"<span style='font-size:12px;font-weight:600;letter-spacing:0.04em;color:{MUTED};text-transform:uppercase'>{label}</span>", unsafe_allow_html=True)
 
             for sym in open_symbols:
@@ -1299,15 +1299,20 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
                 if tech:
                     below20_str = "🔴 Yes" if cmp < tech["ema20"] else "🟢 No"
                     below50_str = "🔴 Yes" if cmp < tech["ema50"] else "🟢 No"
-                    dead_cross_str = "🔴 Yes" if tech["ema20"] < tech["ema50"] else "🟢 No"
+                    cross_badge = (
+                        f"<span style='font-size:9.5px;font-weight:700;color:{RED};background:#3A1C18;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>☠ DEATH CROSS</span>"
+                        if tech["ema20"] < tech["ema50"] else
+                        f"<span style='font-size:9.5px;font-weight:700;color:{GREEN};background:#1B3B2A;border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap'>✨ GOLDEN CROSS</span>"
+                    )
                 else:
-                    below20_str = below50_str = dead_cross_str = "—"
+                    below20_str = below50_str = "—"
+                    cross_badge = ""
 
                 position_value = pos['qty'] * cmp
 
                 pc = st.columns(pos_cols)
                 pc[0].markdown(
-                    f"<div style='padding-top:4px;font-weight:600'>{sym}</div>"
+                    f"<div style='padding-top:4px;font-weight:600'>{sym}{cross_badge}</div>"
                     f"<div class='num' style='font-size:12px;color:{MUTED}'>Buy ₹{pos['avg']:.2f}</div>",
                     unsafe_allow_html=True,
                 )
@@ -1317,16 +1322,15 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
                 pc[4].markdown(f"<div class='num' style='padding-top:6px;color:{pnl_color};font-weight:600'>{pnl_pct:+.1f}%</div>", unsafe_allow_html=True)
                 pc[5].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{below20_str}</div>", unsafe_allow_html=True)
                 pc[6].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{below50_str}</div>", unsafe_allow_html=True)
-                pc[7].markdown(f"<div style='padding-top:6px;font-size:13.5px'>{dead_cross_str}</div>", unsafe_allow_html=True)
 
-                with pc[8]:
+                with pc[7]:
                     with st.container(key=f"pos_buytrig_{active_portfolio}_{sym}"):
                         with st.popover("B", use_container_width=True):
                             st.markdown(f"<div style='font-weight:600;margin-bottom:6px'>Buy {sym}</div>", unsafe_allow_html=True)
                             st.markdown(f"<div class='num' style='font-size:13px;color:{MUTED};margin-bottom:8px'>Live CMP: ₹{cmp:.2f}</div>", unsafe_allow_html=True)
                             pos_buy_qty = st.number_input("Qty", min_value=1, value=1, step=1, key=f"pos_buyqty_{active_portfolio}_{sym}")
                             pos_buy_click = st.button("🟢 Confirm Buy", key=f"pos_buy_{active_portfolio}_{sym}", use_container_width=True)
-                with pc[9]:
+                with pc[8]:
                     with st.container(key=f"pos_selltrig_{active_portfolio}_{sym}"):
                         with st.popover("S", use_container_width=True):
                             st.markdown(f"<div style='font-weight:600;margin-bottom:6px'>Sell {sym}</div>", unsafe_allow_html=True)
