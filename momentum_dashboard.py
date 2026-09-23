@@ -1312,6 +1312,17 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
 
         pp_value_series = fetch_paper_value_series(trade_records, starting_cash) if trade_records else None
 
+        if (pp_value_series is None or len(pp_value_series) < 2) and trade_records:
+            # Historical-price lookup came up short for one or more symbols in this
+            # portfolio (illiquid ticker, network hiccup, etc.) — fall back to a
+            # simple 2-point line from the first trade to right now so every
+            # portfolio with at least one trade still gets a returns chart.
+            first_trade_dt = pd.Timestamp(trade_records[0][0]).normalize()
+            today_dt = pd.Timestamp(datetime.now()).normalize()
+            if today_dt <= first_trade_dt:
+                today_dt = first_trade_dt + pd.Timedelta(days=1)
+            pp_value_series = pd.Series([starting_cash, total_value], index=[first_trade_dt, today_dt])
+
         if pp_value_series is not None and len(pp_value_series) > 1:
             PP_TIMEFRAMES = [("1W", 7), ("2W", 14), ("1M", 30), ("3M", 90), ("6M", 180), ("1Y", 365), ("All", None)]
             pp_tf_key = f"pp_timeframe_{active_portfolio}"
@@ -1381,7 +1392,7 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
             )
             st.plotly_chart(fig_pp, use_container_width=True, config={"displayModeBar": False})
             st.markdown('</div>', unsafe_allow_html=True)
-        elif not trades.empty:
+        elif trade_records:
             st.caption("Not enough trade history yet to chart returns for this portfolio.")
 
         with st.container(key=f"pp_metrics_{active_portfolio}"):
