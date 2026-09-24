@@ -47,6 +47,7 @@ PALETTE = ["#7C8CFF", "#7A8B5E", "#5B9BD5", "#E8590C", "#AE3EC9", "#2ECC71",
 WATCHLISTS_FILE = "watchlists.json"
 PORTFOLIOS_FILE = "portfolios.json"
 PAPER_TRADES_FILE = "paper_trades.csv"
+HOLDINGS_FILE = "holdings.json"
 DEFAULT_STARTING_CASH = 100000.0
 
 # ---------------------------------------------------------------------------
@@ -309,8 +310,9 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ---- Your holdings: (Yahoo ticker, shares, avg buy price) ----
-HOLDINGS = [
+# ---- Seed holdings (used once, only if holdings.json doesn't exist yet):
+# (Yahoo ticker, shares, avg buy price)
+SEED_HOLDINGS = [
     ("EMMVEE.NS",     1, 340.00),
     ("REDINGTON.NS",  1, 392.00),
     ("ACMESOLAR.NS",  1, 458.00),
@@ -324,6 +326,58 @@ HOLDINGS = [
     ("GLAND.NS",      1, 2965.00),
     ("ACUTAAS.NS",    1, 3438.00),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Holdings store — holdings.json
+# { "SYMBOL": {"shares": float, "avg_price": float} }   (symbol has no .NS suffix)
+# ---------------------------------------------------------------------------
+def load_holdings_store():
+    try:
+        with open(HOLDINGS_FILE) as f:
+            data = json.load(f)
+            if data:
+                return data
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    default = {
+        ticker.replace(".NS", ""): {"shares": shares, "avg_price": avg_price}
+        for ticker, shares, avg_price in SEED_HOLDINGS
+    }
+    save_holdings_store(default)
+    return default
+
+
+def save_holdings_store(data):
+    with open(HOLDINGS_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def holdings_store_to_tuples(store):
+    """holdings.json dict -> [(ticker.NS, shares, avg_price), ...] for fetch_prices()."""
+    return [
+        (f"{sym}.NS", h["shares"], h["avg_price"])
+        for sym, h in store.items()
+        if h.get("shares", 0) > 0
+    ]
+
+
+def record_holding_trade(store, symbol, side, qty, price):
+    """Weighted-average-cost update to the holdings store, same method as paper trading."""
+    symbol = symbol.strip().upper()
+    h = store.setdefault(symbol, {"shares": 0, "avg_price": 0.0})
+    if side == "BUY":
+        new_shares = h["shares"] + qty
+        h["avg_price"] = ((h["shares"] * h["avg_price"]) + (qty * price)) / new_shares if new_shares else 0
+        h["shares"] = new_shares
+    else:  # SELL
+        h["shares"] = max(h["shares"] - qty, 0)
+        if h["shares"] == 0:
+            h["avg_price"] = 0.0
+    if h["shares"] <= 0:
+        store.pop(symbol, None)
+    save_holdings_store(store)
+    return store
 
 
 def detect_vcp(hist):
@@ -704,6 +758,8 @@ with c2:
         fetch_paper_value_series.clear()
         st.rerun()
 
+holdings_store = load_holdings_store()
+HOLDINGS = holdings_store_to_tuples(holdings_store)
 df, portfolio_value_series = fetch_prices(HOLDINGS)
 
 
@@ -711,6 +767,7 @@ df, portfolio_value_series = fetch_prices(HOLDINGS)
 # TAB: Holdings
 # =============================================================================
 def render_holdings_tab():
+    global holdings_store
     # -------------------------------------------------------------------
     # Portfolio value history — with timeframe filter
     # -------------------------------------------------------------------
@@ -1026,12 +1083,85 @@ def render_holdings_tab():
         st.markdown('</div>', unsafe_allow_html=True)
 
     # -------------------------------------------------------------------
+    # Manage holdings — record a trade, or edit shares/avg price directly
+    # -------------------------------------------------------------------
+    with st.expander("✏️ Manage Holdings — record a trade or edit directly", expanded=False):
+        mh_tab1, mh_tab2 = st.tabs(["➕ Record a trade", "✏️ Edit directly"])
+
+        with mh_tab1:
+            existing_symbols = sorted(holdings_store.keys())
+            mh_col1, mh_col2 = st.columns(2)
+            mh_symbol_choice = mh_col1.selectbox(
+                "Symbol", existing_symbols + ["— new symbol —"], key="mh_symbol_choice",
+            )
+            if mh_symbol_choice == "— new symbol —":
+                mh_symbol = mh_col1.text_input("New symbol (NSE, no .NS)", key="mh_symbol_new", placeholder="e.g. TCS").strip().upper()
+            else:
+                mh_symbol = mh_symbol_choice
+
+            mh_side = mh_col2.radio("Trade", ["BUY", "SELL"], key="mh_side", horizontal=True)
+
+            live_cmp = None
+            if mh_symbol:
+                cur_row = df[df["Symbol"] == mh_symbol]
+                if not cur_row.empty and pd.notna(cur_row.iloc[0]["CMP"]):
+                    live_cmp = float(cur_row.iloc[0]["CMP"])
+                else:
+                    live_cmp = fetch_watchlist_prices((mh_symbol,)).get(mh_symbol)
+
+            mh_col3, mh_col4 = st.columns(2)
+            mh_qty = mh_col3.number_input("Units", min_value=1, value=1, step=1, key="mh_qty")
+            mh_price = mh_col4.number_input(
+                "Price per unit", min_value=0.0,
+                value=float(live_cmp) if live_cmp else 0.0, step=0.05, key="mh_price",
+            )
+            if live_cmp:
+                st.caption(f"Live CMP for {mh_symbol}: ₹{live_cmp:,.2f}")
+
+            cur_held = holdings_store.get(mh_symbol, {}).get("shares", 0) if mh_symbol else 0
+            if mh_symbol and mh_side == "SELL" and mh_qty > cur_held:
+                st.warning(f"You only hold {cur_held} unit(s) of {mh_symbol}.")
+
+            apply_disabled = not mh_symbol or mh_price <= 0 or (mh_side == "SELL" and mh_qty > cur_held)
+            if st.button("Apply trade", key="mh_apply", use_container_width=True, disabled=apply_disabled):
+                holdings_store = record_holding_trade(holdings_store, mh_symbol, mh_side, mh_qty, mh_price)
+                fetch_prices.clear()
+                st.success(f"{'Bought' if mh_side == 'BUY' else 'Sold'} {mh_qty} {mh_symbol} @ ₹{mh_price:.2f}. Holdings updated.")
+                st.rerun()
+
+        with mh_tab2:
+            st.caption("Edit units or average price directly, or add/remove rows. Click Save when done.")
+            edit_df = pd.DataFrame(
+                [{"Symbol": sym, "Shares": h["shares"], "Avg Price": h["avg_price"]} for sym, h in holdings_store.items()]
+            ).sort_values("Symbol").reset_index(drop=True)
+            edited = st.data_editor(
+                edit_df, num_rows="dynamic", use_container_width=True, hide_index=True, key="mh_editor",
+                column_config={
+                    "Symbol": st.column_config.TextColumn("Symbol", required=True),
+                    "Shares": st.column_config.NumberColumn("Shares", min_value=0, step=1, required=True),
+                    "Avg Price": st.column_config.NumberColumn("Avg Price", min_value=0.0, step=0.05, required=True),
+                },
+            )
+            if st.button("Save changes", key="mh_save", use_container_width=True):
+                new_store = {}
+                for _, r in edited.iterrows():
+                    sym = str(r["Symbol"]).strip().upper()
+                    shares = float(r["Shares"]) if pd.notna(r["Shares"]) else 0
+                    avg_price = float(r["Avg Price"]) if pd.notna(r["Avg Price"]) else 0
+                    if sym and shares > 0:
+                        new_store[sym] = {"shares": shares, "avg_price": avg_price}
+                save_holdings_store(new_store)
+                fetch_prices.clear()
+                st.success("Holdings saved.")
+                st.rerun()
+
+    # -------------------------------------------------------------------
     # Footer note
     # -------------------------------------------------------------------
     st.markdown(
         """
         <div class="caption-box">
-        Edit <code>HOLDINGS</code> in the script whenever you rebalance. Verify tickers on finance.yahoo.com if any row shows blank prices.<br>
+        Use <b>Manage Holdings</b> above to record trades or edit shares/avg price whenever you rebalance.<br>
         <b>EMA flags are informational only</b> — your backtests showed EMA-based exits are unvalidated and can hurt returns.
         Your tested exit rule is rank-based (drop from top-25), not EMA.
         </div>
