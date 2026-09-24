@@ -184,10 +184,14 @@ st.markdown(f"""
         border-radius: 8px !important; width: 100% !important; text-align: center !important;
     }}
     [class*="st-key-wl_buytrig_"] button, [class*="st-key-wl_selltrig_"] button,
-    [class*="st-key-pos_buytrig_"] button, [class*="st-key-pos_selltrig_"] button {{
+    [class*="st-key-pos_buytrig_"] button, [class*="st-key-pos_selltrig_"] button,
+    [class*="st-key-h_edittrig_"] button {{
         min-height: 34px !important; height: 34px !important; width: 34px !important;
         padding: 0 !important; border-radius: 50% !important; font-size: 13px !important;
         margin-top: 6px;
+    }}
+    [class*="st-key-h_edittrig_"] button {{
+        background: {CARD} !important; color: {INK} !important; border: 1px solid {BORDER} !important;
     }}
     [class*="st-key-wl_buytrig_"] button, [class*="st-key-pos_buytrig_"] button {{
         background: {GREEN} !important; color: #FFFFFF !important; border: 1px solid {GREEN} !important;
@@ -931,7 +935,7 @@ def render_holdings_tab():
                 spark = r.get("Spark") or []
                 spark_color = GREEN if (spark and spark[-1] >= spark[0]) else RED
 
-                c1, c2, c3, c4, c5, _sp = st.columns(COL_WIDTHS)
+                c1, c2, c3, c4, c5, c6 = st.columns(COL_WIDTHS)
                 with c1:
                     ac1, ac2 = st.columns([0.5, 3])
                     ac1.markdown(avatar_html(r["Symbol"]), unsafe_allow_html=True)
@@ -971,6 +975,26 @@ def render_holdings_tab():
                     f"<div class='num' style='font-size:13px;color:{MUTED}'>{invested_disp}</div>",
                     unsafe_allow_html=True,
                 )
+                with c6:
+                    with st.container(key=f"h_edittrig_{r['Symbol']}"):
+                        with st.popover("✏️", use_container_width=True):
+                            st.markdown(f"<div style='font-weight:600;margin-bottom:6px'>Edit {r['Symbol']}</div>", unsafe_allow_html=True)
+                            e_shares = st.number_input("Shares", min_value=0.0, value=float(r["Shares"]), step=1.0, key=f"h_edit_shares_{r['Symbol']}")
+                            e_avg = st.number_input("Avg Price", min_value=0.0, value=float(r["Avg Price"]), step=0.05, key=f"h_edit_avg_{r['Symbol']}")
+                            e_col1, e_col2 = st.columns(2)
+                            if e_col1.button("Save", key=f"h_edit_save_{r['Symbol']}", use_container_width=True):
+                                if e_shares <= 0:
+                                    holdings_store.pop(r["Symbol"], None)
+                                else:
+                                    holdings_store[r["Symbol"]] = {"shares": e_shares, "avg_price": e_avg}
+                                save_holdings_store(holdings_store)
+                                fetch_prices.clear()
+                                st.rerun()
+                            if e_col2.button("🗑️ Remove", key=f"h_edit_remove_{r['Symbol']}", use_container_width=True):
+                                holdings_store.pop(r["Symbol"], None)
+                                save_holdings_store(holdings_store)
+                                fetch_prices.clear()
+                                st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
     row = df_sorted[df_sorted["Symbol"] == st.session_state.selected_symbol].iloc[0]
