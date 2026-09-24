@@ -421,19 +421,47 @@ def detect_vcp(hist):
         return False
 
 
-@st.cache_data(ttl=5)
+def _batch_download(tickers, period):
+    """Fetch OHLCV for multiple tickers in a single yfinance call instead of
+    looping yf.Ticker(...).history() one ticker at a time — this is the main
+    thing that made the dashboard slow. Returns {ticker: DataFrame}, with an
+    empty DataFrame for any ticker that failed."""
+    tickers = list(tickers)
+    out = {t: pd.DataFrame() for t in tickers}
+    if not tickers:
+        return out
+    try:
+        raw = yf.download(tickers, period=period, group_by="ticker", threads=True, progress=False, auto_adjust=False)
+        if raw is None or raw.empty:
+            return out
+        if len(tickers) == 1:
+            out[tickers[0]] = raw.dropna(how="all")
+        else:
+            top_level = set(raw.columns.get_level_values(0))
+            for t in tickers:
+                if t in top_level:
+                    out[t] = raw[t].dropna(how="all")
+    except Exception:
+        pass
+    return out
+
+
+@st.cache_data(ttl=45)
 def fetch_prices(holdings):
     rows = []
     price_series = {}   # ticker -> Series of Close, indexed by date (up to 1y)
+    tickers = [h[0] for h in holdings]
+    data = _batch_download(tickers, period="1y")
+
     for ticker, shares, avg_price in holdings:
         cmp, prev_close, ema20, ema50 = None, None, None, None
         volume, avg_volume, vol_ratio = None, None, None
         spark = []
         vcp = False
         try:
-            t = yf.Ticker(ticker)
-            hist = t.history(period="1y")
-            if not hist.empty:
+            hist = data.get(ticker)
+            if hist is not None and not hist.empty and "Close" in hist:
+                hist = hist.dropna(subset=["Close"])
                 cmp = round(float(hist["Close"].iloc[-1]), 2)
                 prev_close = round(float(hist["Close"].iloc[-2]), 2) if len(hist) > 1 else cmp
                 volume = int(hist["Volume"].iloc[-1])
@@ -443,11 +471,11 @@ def fetch_prices(holdings):
                 spark = hist["Close"].tail(15).tolist()
                 price_series[ticker] = hist["Close"]
                 vcp = detect_vcp(hist)
-
-            hist_long = t.history(period="4mo")
-            if len(hist_long) >= 50:
-                ema20 = round(float(hist_long["Close"].ewm(span=20, adjust=False).mean().iloc[-1]), 2)
-                ema50 = round(float(hist_long["Close"].ewm(span=50, adjust=False).mean().iloc[-1]), 2)
+                # EMA20/50 computed off the same 1y history we already fetched
+                # (previously a second, separate per-ticker "4mo" fetch).
+                if len(hist) >= 50:
+                    ema20 = round(float(hist["Close"].ewm(span=20, adjust=False).mean().iloc[-1]), 2)
+                    ema50 = round(float(hist["Close"].ewm(span=50, adjust=False).mean().iloc[-1]), 2)
         except Exception:
             pass
 
@@ -494,29 +522,31 @@ def fetch_prices(holdings):
     return pd.DataFrame(rows), portfolio_value_series
 
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=45)
 def fetch_watchlist_prices(symbols):
+    tickers = [s + ".NS" for s in symbols]
+    data = _batch_download(tickers, period="2d")
     out = {}
     for sym in symbols:
+        h = data.get(sym + ".NS")
         try:
-            t = yf.Ticker(sym + ".NS")
-            h = t.history(period="2d")
-            out[sym] = round(float(h["Close"].iloc[-1]), 2) if not h.empty else None
+            out[sym] = round(float(h["Close"].iloc[-1]), 2) if h is not None and not h.empty else None
         except Exception:
             out[sym] = None
     return out
 
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=45)
 def fetch_watchlist_detail(symbols):
     """Richer per-symbol data for the watchlist table: cmp, day change, volume, sparkline."""
+    tickers = [s + ".NS" for s in symbols]
+    data = _batch_download(tickers, period="1mo")
     out = {}
     for sym in symbols:
         cmp, prev_close, volume, spark = None, None, None, []
         try:
-            t = yf.Ticker(sym + ".NS")
-            hist = t.history(period="1mo")
-            if not hist.empty:
+            hist = data.get(sym + ".NS")
+            if hist is not None and not hist.empty:
                 cmp = round(float(hist["Close"].iloc[-1]), 2)
                 prev_close = round(float(hist["Close"].iloc[-2]), 2) if len(hist) > 1 else cmp
                 volume = int(hist["Volume"].iloc[-1]) if "Volume" in hist else None
@@ -592,7 +622,7 @@ def avatar_html(symbol, size=34):
     )
 
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=45)
 def fetch_paper_value_series(trades_records, starting_cash):
     """trades_records: tuple of (timestamp_iso, symbol, side, qty, price) sorted by time.
     Returns a pandas Series of total portfolio value (cash + holdings, priced at each day's
@@ -602,11 +632,11 @@ def fetch_paper_value_series(trades_records, starting_cash):
 
     symbols = sorted(set(r[1] for r in trades_records))
     price_series = {}
+    data = _batch_download([sym + ".NS" for sym in symbols], period="1y")
     for sym in symbols:
         try:
-            t = yf.Ticker(sym + ".NS")
-            hist = t.history(period="1y")
-            if not hist.empty:
+            hist = data.get(sym + ".NS")
+            if hist is not None and not hist.empty:
                 s = hist["Close"]
                 if s.index.tz is not None:
                     s.index = s.index.tz_localize(None)
@@ -653,15 +683,15 @@ def fetch_paper_value_series(trades_records, starting_cash):
     return pd.Series(values, index=combined.index)
 
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=45)
 def fetch_technicals(symbols):
     """EMA20/EMA50 + VCP flag for arbitrary NSE symbols (used by watchlists and paper portfolios)."""
     out = {}
+    data = _batch_download([sym + ".NS" for sym in symbols], period="6mo")
     for sym in symbols:
         try:
-            t = yf.Ticker(sym + ".NS")
-            hist = t.history(period="6mo")
-            if len(hist) >= 50:
+            hist = data.get(sym + ".NS")
+            if hist is not None and len(hist) >= 50:
                 ema20 = round(float(hist["Close"].ewm(span=20, adjust=False).mean().iloc[-1]), 2)
                 ema50 = round(float(hist["Close"].ewm(span=50, adjust=False).mean().iloc[-1]), 2)
                 out[sym] = {"ema20": ema20, "ema50": ema50, "vcp": detect_vcp(hist)}
