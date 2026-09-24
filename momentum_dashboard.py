@@ -772,11 +772,17 @@ def render_holdings_tab():
                 x=pv_view.index, y=pv_view.values,
                 mode="lines", line=dict(color=pv_color, width=2),
                 fill="tozeroy", fillcolor=pv_color + "22",
+                hovertemplate="%{x|%d %b %Y}<br>₹%{y:,.0f}<extra></extra>",
             ))
             fig_pv.update_layout(
-                height=100, margin=dict(l=0, r=0, t=0, b=0),
+                height=230, margin=dict(l=0, r=0, t=6, b=0),
                 plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                xaxis=dict(visible=False), yaxis=dict(visible=False),
+                font_color=INK, hovermode="x unified",
+                xaxis=dict(
+                    visible=True, showgrid=False, tickfont=dict(size=11, color=MUTED),
+                    tickformat="%d %b", rangeslider=dict(visible=True, thickness=0.08, bgcolor=CARD, bordercolor=BORDER),
+                ),
+                yaxis=dict(visible=True, showgrid=True, gridcolor=BORDER, tickfont=dict(size=11, color=MUTED), tickprefix="₹"),
             )
 
             st.markdown(
@@ -785,7 +791,7 @@ def render_holdings_tab():
                 f"<span class='num' style='font-size:12.5px;font-weight:600;color:{pv_color}'>{pv_pct:+.1f}% over period</span></div>",
                 unsafe_allow_html=True,
             )
-            st.plotly_chart(fig_pv, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig_pv, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
             st.markdown('</div>', unsafe_allow_html=True)
 
     # -------------------------------------------------------------------
@@ -1517,11 +1523,17 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
                 x=pp_view.index, y=pp_view.values,
                 mode="lines", line=dict(color=pp_color, width=2),
                 fill="tozeroy", fillcolor=pp_color + "22",
+                hovertemplate="%{x|%d %b %Y}<br>₹%{y:,.0f}<extra></extra>",
             ))
             fig_pp.update_layout(
-                height=100, margin=dict(l=0, r=0, t=0, b=0),
+                height=230, margin=dict(l=0, r=0, t=6, b=0),
                 plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                xaxis=dict(visible=False), yaxis=dict(visible=False),
+                font_color=INK, hovermode="x unified",
+                xaxis=dict(
+                    visible=True, showgrid=False, tickfont=dict(size=11, color=MUTED),
+                    tickformat="%d %b", rangeslider=dict(visible=True, thickness=0.08, bgcolor=CARD, bordercolor=BORDER),
+                ),
+                yaxis=dict(visible=True, showgrid=True, gridcolor=BORDER, tickfont=dict(size=11, color=MUTED), tickprefix="₹"),
             )
             st.markdown(
                 f"<div style='display:flex;justify-content:space-between;align-items:baseline;margin:4px 0'>"
@@ -1529,7 +1541,7 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
                 f"<span class='num' style='font-size:12.5px;font-weight:600;color:{pp_color}'>{pp_pct:+.1f}% over period</span></div>",
                 unsafe_allow_html=True,
             )
-            st.plotly_chart(fig_pp, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig_pp, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
             st.markdown('</div>', unsafe_allow_html=True)
         elif trade_records:
             st.caption("Not enough trade history yet to chart returns for this portfolio.")
