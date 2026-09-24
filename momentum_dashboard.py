@@ -14,6 +14,7 @@ Edit the HOLDINGS list below whenever you buy/sell or rebalance.
 """
 
 import os
+import io
 import json
 import streamlit as st
 import yfinance as yf
@@ -528,6 +529,35 @@ def fetch_watchlist_detail(symbols):
     return out
 
 
+def df_to_csv_bytes(df):
+    return df.to_csv(index=False).encode("utf-8")
+
+
+def df_to_excel_bytes(df, sheet_name="Sheet1"):
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+    return buf.getvalue()
+
+
+def export_buttons(df, base_filename, key_prefix):
+    """Renders a CSV + Excel download button pair for a dataframe."""
+    ec1, ec2 = st.columns(2)
+    ec1.download_button(
+        "⬇️ CSV", data=df_to_csv_bytes(df), file_name=f"{base_filename}.csv",
+        mime="text/csv", use_container_width=True, key=f"{key_prefix}_csv",
+    )
+    try:
+        excel_bytes = df_to_excel_bytes(df)
+        ec2.download_button(
+            "⬇️ Excel", data=excel_bytes, file_name=f"{base_filename}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True, key=f"{key_prefix}_xlsx",
+        )
+    except Exception:
+        ec2.caption("Excel export needs `openpyxl` (`pip3 install openpyxl`).")
+
+
 def sparkline_svg(values, color, width=90, height=28):
     if not values or len(values) < 2:
         return f"<svg width='{width}' height='{height}'></svg>"
@@ -981,11 +1011,16 @@ def render_holdings_tab():
     # -------------------------------------------------------------------
     # Holdings — ranked table with sort pills, detail panel on the right
     # -------------------------------------------------------------------
-    st.subheader("Holdings")
+    hh1, hh2 = st.columns([3, 1.4])
+    hh1.subheader("Holdings")
 
     df_sorted = df.sort_values("P&L %", ascending=False, na_position="last").reset_index(drop=True)
     df_sorted.insert(0, "Rank", df_sorted.index + 1)
     df_sorted["Allocation %"] = (df_sorted["Value"] / total_current * 100) if total_current else 0
+
+    with hh2:
+        export_cols = ["Rank", "Symbol", "Shares", "Avg Price", "CMP", "Day %", "Invested", "Value", "P&L ₹", "P&L %", "Allocation %", "EMA20", "EMA50", "VCP"]
+        export_buttons(df_sorted[export_cols], "holdings", "export_holdings")
 
     if "selected_symbol" not in st.session_state:
         st.session_state.selected_symbol = df_sorted.iloc[0]["Symbol"]
@@ -1504,10 +1539,23 @@ def _render_one_watchlist(active_name, watchlists, portfolios, portfolio_names, 
             reverse=_wl_reverse,
         )
 
-        if trade_portfolio:
-            st.caption(f"Buy/Sell below trade the **{trade_portfolio}** paper portfolio.")
-        else:
-            st.caption("No paper portfolio exists yet — create one in the Paper Trading tab to enable Buy/Sell here.")
+        wl_cap_col, wl_exp_col = st.columns([3, 1.4])
+        with wl_cap_col:
+            if trade_portfolio:
+                st.caption(f"Buy/Sell below trade the **{trade_portfolio}** paper portfolio.")
+            else:
+                st.caption("No paper portfolio exists yet — create one in the Paper Trading tab to enable Buy/Sell here.")
+        with wl_exp_col:
+            wl_export_df = pd.DataFrame([
+                {
+                    "Symbol": s["Symbol"], "Rank": s.get("Rank"), "Score": s.get("Score"),
+                    "CMP": wl_detail.get(s["Symbol"], {}).get("cmp"),
+                    "Day %": s.get("_day_pct"), "Volume": s.get("_volume"),
+                    "Paper Value": s.get("_value"),
+                }
+                for s in stocks
+            ])
+            export_buttons(wl_export_df, f"watchlist_{active_name}", f"export_wl_{active_name}")
 
         with st.container(key=f"wl_table_scroll_{active_name}"):
             st.markdown(f'<div class="card" style="padding:0;overflow:hidden;background:{CARD_TABLE};">', unsafe_allow_html=True)
@@ -1821,10 +1869,23 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
             j3.metric("Unrealized P&L", f"₹{unrealized_pnl:,.0f}")
 
         # -- Open positions ----------------------------------------------------
-        st.subheader(f"Open Positions — {active_portfolio}")
+        pp_hdr1, pp_hdr2 = st.columns([3, 1.4])
+        pp_hdr1.subheader(f"Open Positions — {active_portfolio}")
         if not open_symbols:
             st.caption("No open positions yet — place a trade on the right or from a linked Watchlist.")
         else:
+            with pp_hdr2:
+                pos_export_df = pd.DataFrame([
+                    {
+                        "Stock": sym, "Qty": positions[sym]["qty"], "Buy Price": positions[sym]["avg"],
+                        "CMP": live_prices.get(sym) or positions[sym]["avg"],
+                        "Value": positions[sym]["qty"] * (live_prices.get(sym) or positions[sym]["avg"]),
+                        "P&L %": (((live_prices.get(sym) or positions[sym]["avg"]) - positions[sym]["avg"]) / positions[sym]["avg"] * 100) if positions[sym]["avg"] else 0,
+                    }
+                    for sym in open_symbols
+                ])
+                export_buttons(pos_export_df, f"paper_positions_{active_portfolio}", f"export_pos_{active_portfolio}")
+
             technicals = fetch_technicals(tuple(open_symbols))
 
             _pos_sort_metrics = {}
@@ -1950,6 +2011,7 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
                 hist = port_trades.sort_values("Timestamp", ascending=False).copy()
                 hist["Timestamp"] = hist["Timestamp"].dt.strftime("%d %b %Y, %H:%M")
                 st.dataframe(hist.drop(columns=["Portfolio"]), use_container_width=True, hide_index=True)
+                export_buttons(hist.drop(columns=["Portfolio"]), f"trade_history_{active_portfolio}", f"export_hist_{active_portfolio}")
 
                 if st.button(f"🗑️ Reset \"{active_portfolio}\" (clear its trades)", key=f"reset_{active_portfolio}"):
                     trades = trades[trades["Portfolio"] != active_portfolio]
