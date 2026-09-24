@@ -326,7 +326,6 @@ HOLDINGS = [
 ]
 
 
-@st.cache_data(ttl=5)
 def detect_vcp(hist):
     """Lightweight heuristic for a Volatility Contraction Pattern (Minervini-style):
     price still fairly close to its recent high (structurally in an uptrend, not
@@ -363,6 +362,7 @@ def detect_vcp(hist):
         return False
 
 
+@st.cache_data(ttl=5)
 def fetch_prices(holdings):
     rows = []
     price_series = {}   # ticker -> Series of Close, indexed by date (up to 1y)
