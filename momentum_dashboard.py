@@ -844,30 +844,6 @@ with c2:
         fetch_market_regime.clear()
         st.rerun()
 
-# ---------------------------------------------------------------------------
-# Regime banner — bullish/bearish call on NIFTY 500, Supertrend(1, 2.5)
-# ---------------------------------------------------------------------------
-_regime = fetch_market_regime()
-if _regime:
-    _r_color = GREEN if _regime["bullish"] else RED
-    _r_bg = "#12291C" if _regime["bullish"] else "#3A1C18"
-    _r_label = "BULLISH — in the market" if _regime["bullish"] else "BEARISH — sit out"
-    _r_day = f"{_regime['day_pct']:+.2f}%" if _regime["day_pct"] is not None else "—"
-    st.markdown(
-        f"<div style='background:{_r_bg};border:1px solid {_r_color}55;border-radius:10px;"
-        f"padding:10px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px'>"
-        f"<div style='display:flex;align-items:center;gap:10px'>"
-        f"<span style='font-size:18px'>{'🟢' if _regime['bullish'] else '🔴'}</span>"
-        f"<span style='font-weight:700;font-size:14.5px;color:{_r_color}'>MARKET REGIME: {_r_label}</span>"
-        f"<span style='font-size:12px;color:{MUTED}'>· NIFTY 500 · Supertrend(1, 2.5)</span></div>"
-        f"<div class='num' style='font-size:13px;color:{MUTED}'>"
-        f"CMP {_regime['cmp']:,.0f} ({_r_day}) &nbsp;·&nbsp; Supertrend level {_regime['supertrend']:,.0f}</div>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-else:
-    st.caption("⚠️ Couldn't fetch NIFTY 500 data for the market regime filter right now.")
-
 holdings_store = load_holdings_store()
 HOLDINGS = holdings_store_to_tuples(holdings_store)
 df, portfolio_value_series = fetch_prices(HOLDINGS)
@@ -879,7 +855,24 @@ df, portfolio_value_series = fetch_prices(HOLDINGS)
 def render_holdings_tab():
     global holdings_store
     # -------------------------------------------------------------------
-    # Portfolio value history — with timeframe filter
+    # Summary cards — shown above the portfolio value chart
+    # -------------------------------------------------------------------
+    total_invested = df["Invested"].sum()
+    total_current = df["Value"].sum(skipna=True)
+    total_pnl = total_current - total_invested
+    total_pnl_pct = (total_pnl / total_invested * 100) if total_invested else 0
+    n_below20 = int(df["Below EMA20"].sum())
+    n_below50 = int(df["Below EMA50"].sum())
+
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("Invested", f"₹{total_invested:,.0f}")
+    k2.metric("Current Value", f"₹{total_current:,.0f}")
+    k3.metric("Total P&L (unrealized)", f"₹{total_pnl:,.0f}", f"{total_pnl_pct:+.2f}%")
+    k4.metric("Below EMA20", f"{n_below20} of {len(df)}")
+    k5.metric("Below EMA50", f"{n_below50} of {len(df)}")
+
+    # -------------------------------------------------------------------
+    # Portfolio value history — with timeframe filter, regime banner on the right
     # -------------------------------------------------------------------
     if portfolio_value_series is not None and len(portfolio_value_series) > 1:
         TIMEFRAMES = [("1W", 7), ("2W", 14), ("1M", 30), ("3M", 90), ("6M", 180), ("1Y", 365), ("All", None)]
@@ -961,22 +954,29 @@ def render_holdings_tab():
             st.plotly_chart(fig_pv, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
             st.markdown('</div>', unsafe_allow_html=True)
 
-    # -------------------------------------------------------------------
-    # Summary cards
-    # -------------------------------------------------------------------
-    total_invested = df["Invested"].sum()
-    total_current = df["Value"].sum(skipna=True)
-    total_pnl = total_current - total_invested
-    total_pnl_pct = (total_pnl / total_invested * 100) if total_invested else 0
-    n_below20 = int(df["Below EMA20"].sum())
-    n_below50 = int(df["Below EMA50"].sum())
-
-    k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Invested", f"₹{total_invested:,.0f}")
-    k2.metric("Current Value", f"₹{total_current:,.0f}")
-    k3.metric("Total P&L (unrealized)", f"₹{total_pnl:,.0f}", f"{total_pnl_pct:+.2f}%")
-    k4.metric("Below EMA20", f"{n_below20} of {len(df)}")
-    k5.metric("Below EMA50", f"{n_below50} of {len(df)}")
+        with _pv_spacer:
+            _regime = fetch_market_regime()
+            if _regime:
+                _r_color = GREEN if _regime["bullish"] else RED
+                _r_bg = "#12291C" if _regime["bullish"] else "#3A1C18"
+                _r_label = "BULLISH" if _regime["bullish"] else "BEARISH"
+                _r_sub = "in the market" if _regime["bullish"] else "sit out"
+                _r_day = f"{_regime['day_pct']:+.2f}%" if _regime["day_pct"] is not None else "—"
+                st.markdown(
+                    f"<div style='background:{_r_bg};border:1px solid {_r_color}55;border-radius:10px;"
+                    f"padding:16px 18px;height:230px;display:flex;flex-direction:column;justify-content:center;gap:8px'>"
+                    f"<div style='font-size:12px;color:{MUTED};text-transform:uppercase;letter-spacing:0.04em'>Market Regime</div>"
+                    f"<div style='display:flex;align-items:center;gap:8px'>"
+                    f"<span style='font-size:22px'>{'🟢' if _regime['bullish'] else '🔴'}</span>"
+                    f"<div><div style='font-weight:700;font-size:17px;color:{_r_color}'>{_r_label}</div>"
+                    f"<div style='font-size:12px;color:{MUTED}'>{_r_sub}</div></div></div>"
+                    f"<div class='num' style='font-size:13px;color:{MUTED};margin-top:6px'>NIFTY 500: {_regime['cmp']:,.0f} ({_r_day})</div>"
+                    f"<div class='num' style='font-size:12px;color:{MUTED}'>Supertrend(1, 2.5): {_regime['supertrend']:,.0f}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.caption("⚠️ Couldn't fetch NIFTY 500 data for the market regime filter right now.")
 
     # -------------------------------------------------------------------
     # Holdings — ranked table with sort pills, detail panel on the right
