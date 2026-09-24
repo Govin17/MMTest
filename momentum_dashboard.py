@@ -732,6 +732,87 @@ def compute_paper_positions(trades, portfolio, starting_cash):
 
 
 # ---------------------------------------------------------------------------
+# Market regime filter — Supertrend(1, 2.5) on NIFTY 500
+# (matches the regime filter used across the backtested strategy: sit out
+# of the market when the regime index is bearish.)
+# ---------------------------------------------------------------------------
+def compute_supertrend(hist, period=1, multiplier=2.5):
+    high, low, close = hist["High"], hist["Low"], hist["Close"]
+    prev_close = close.shift(1)
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    atr = tr.rolling(period).mean() if period > 1 else tr
+
+    hl2 = (high + low) / 2
+    basic_upper = hl2 + multiplier * atr
+    basic_lower = hl2 - multiplier * atr
+
+    n = len(hist)
+    final_upper = basic_upper.copy()
+    final_lower = basic_lower.copy()
+    supertrend = pd.Series(index=hist.index, dtype=float)
+    direction = pd.Series(index=hist.index, dtype=int)  # 1 = bullish, -1 = bearish
+
+    for i in range(n):
+        if i == 0:
+            final_upper.iloc[i] = basic_upper.iloc[i]
+            final_lower.iloc[i] = basic_lower.iloc[i]
+            direction.iloc[i] = 1
+            supertrend.iloc[i] = final_lower.iloc[i]
+            continue
+
+        final_upper.iloc[i] = (
+            basic_upper.iloc[i]
+            if (basic_upper.iloc[i] < final_upper.iloc[i - 1] or close.iloc[i - 1] > final_upper.iloc[i - 1])
+            else final_upper.iloc[i - 1]
+        )
+        final_lower.iloc[i] = (
+            basic_lower.iloc[i]
+            if (basic_lower.iloc[i] > final_lower.iloc[i - 1] or close.iloc[i - 1] < final_lower.iloc[i - 1])
+            else final_lower.iloc[i - 1]
+        )
+
+        if close.iloc[i] > final_upper.iloc[i - 1]:
+            direction.iloc[i] = 1
+        elif close.iloc[i] < final_lower.iloc[i - 1]:
+            direction.iloc[i] = -1
+        else:
+            direction.iloc[i] = direction.iloc[i - 1]
+
+        supertrend.iloc[i] = final_lower.iloc[i] if direction.iloc[i] == 1 else final_upper.iloc[i]
+
+    return supertrend, direction
+
+
+@st.cache_data(ttl=30)
+def fetch_market_regime():
+    """NIFTY 500 regime via Supertrend(1, 2.5). Tries a couple of ticker
+    spellings since Yahoo's symbol for the index has changed over time."""
+    for ticker in ("^CRSLDX", "NIFTY500.NS"):
+        try:
+            hist = yf.Ticker(ticker).history(period="1y")
+            if hist.empty or len(hist) < 10:
+                continue
+            supertrend, direction = compute_supertrend(hist, period=1, multiplier=2.5)
+            cmp = float(hist["Close"].iloc[-1])
+            prev_close = float(hist["Close"].iloc[-2]) if len(hist) > 1 else cmp
+            day_pct = ((cmp - prev_close) / prev_close * 100) if prev_close else None
+            return {
+                "bullish": bool(direction.iloc[-1] == 1),
+                "cmp": cmp,
+                "day_pct": day_pct,
+                "supertrend": float(supertrend.iloc[-1]),
+                "ticker": ticker,
+            }
+        except Exception:
+            continue
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
 c1, c2 = st.columns([5, 1])
@@ -760,7 +841,32 @@ with c2:
         fetch_watchlist_detail.clear()
         fetch_technicals.clear()
         fetch_paper_value_series.clear()
+        fetch_market_regime.clear()
         st.rerun()
+
+# ---------------------------------------------------------------------------
+# Regime banner — bullish/bearish call on NIFTY 500, Supertrend(1, 2.5)
+# ---------------------------------------------------------------------------
+_regime = fetch_market_regime()
+if _regime:
+    _r_color = GREEN if _regime["bullish"] else RED
+    _r_bg = "#12291C" if _regime["bullish"] else "#3A1C18"
+    _r_label = "BULLISH — in the market" if _regime["bullish"] else "BEARISH — sit out"
+    _r_day = f"{_regime['day_pct']:+.2f}%" if _regime["day_pct"] is not None else "—"
+    st.markdown(
+        f"<div style='background:{_r_bg};border:1px solid {_r_color}55;border-radius:10px;"
+        f"padding:10px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px'>"
+        f"<div style='display:flex;align-items:center;gap:10px'>"
+        f"<span style='font-size:18px'>{'🟢' if _regime['bullish'] else '🔴'}</span>"
+        f"<span style='font-weight:700;font-size:14.5px;color:{_r_color}'>MARKET REGIME: {_r_label}</span>"
+        f"<span style='font-size:12px;color:{MUTED}'>· NIFTY 500 · Supertrend(1, 2.5)</span></div>"
+        f"<div class='num' style='font-size:13px;color:{MUTED}'>"
+        f"CMP {_regime['cmp']:,.0f} ({_r_day}) &nbsp;·&nbsp; Supertrend level {_regime['supertrend']:,.0f}</div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+else:
+    st.caption("⚠️ Couldn't fetch NIFTY 500 data for the market regime filter right now.")
 
 holdings_store = load_holdings_store()
 HOLDINGS = holdings_store_to_tuples(holdings_store)
