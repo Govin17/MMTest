@@ -435,12 +435,13 @@ def _batch_download(tickers, period):
         if raw is None or raw.empty:
             return out
         if len(tickers) == 1:
-            out[tickers[0]] = raw.dropna(how="all")
+            out[tickers[0]] = raw.dropna(subset=["Close"]) if "Close" in raw else raw.dropna(how="all")
         else:
             top_level = set(raw.columns.get_level_values(0))
             for t in tickers:
                 if t in top_level:
-                    out[t] = raw[t].dropna(how="all")
+                    sub = raw[t]
+                    out[t] = sub.dropna(subset=["Close"]) if "Close" in sub else sub.dropna(how="all")
     except Exception:
         pass
     return out
@@ -1735,10 +1736,14 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
 
     live_prices = fetch_watchlist_prices(tuple(open_symbols)) if open_symbols else {}
 
+    def _safe_price(s):
+        p = live_prices.get(s)
+        return p if (p is not None and pd.notna(p)) else positions[s]["avg"]
+
     invested_value = sum(positions[s]["qty"] * positions[s]["avg"] for s in open_symbols)
-    holdings_value = sum((positions[s]["qty"] * (live_prices.get(s) or positions[s]["avg"])) for s in open_symbols)
+    holdings_value = sum((positions[s]["qty"] * _safe_price(s)) for s in open_symbols)
     unrealized_pnl = sum(
-        (positions[s]["qty"] * ((live_prices.get(s) or positions[s]["avg"]) - positions[s]["avg"]))
+        (positions[s]["qty"] * (_safe_price(s) - positions[s]["avg"]))
         for s in open_symbols
     )
     total_value = cash + holdings_value
