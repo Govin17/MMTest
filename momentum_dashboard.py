@@ -2042,14 +2042,21 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
         with st.expander(f"Trade History — {active_portfolio} ({len(port_trades)})", expanded=False):
             # -- Import trades from CSV/Excel (e.g. a previous export) ------
             st.markdown("**Import trades**")
-            st.caption(f"Needs columns: Symbol, Side (BUY/SELL), Qty, Price. Optional: Timestamp, Amount. "
-                       f"All rows are added to \"{active_portfolio}\"; exact duplicates are skipped.")
+            st.caption(f"Accepts a trade-history file (Symbol, Side, Qty, Price, optional Timestamp) or an Open Positions "
+                       f"file (Stock, Qty, Buy Price) — positions are imported as BUYs at the Buy Price, skipping stocks "
+                       f"already held. Rows go into \"{active_portfolio}\".")
             imp_file = st.file_uploader("Trades file", type=["csv", "xlsx", "xls"], label_visibility="collapsed",
                                         key=f"import_trades_{active_portfolio}")
             if imp_file is not None and st.button("⬆️ Import into this portfolio", key=f"import_btn_{active_portfolio}"):
                 try:
                     imp = pd.read_csv(imp_file) if imp_file.name.lower().endswith(".csv") else pd.read_excel(imp_file)
                     imp.columns = [str(c).strip().title() for c in imp.columns]
+                    # Accept the Open Positions export too (Stock, Qty, Buy Price, CMP, Value, P&L %):
+                    # each row becomes a BUY of Qty @ Buy Price.
+                    imp = imp.rename(columns={"Stock": "Symbol", "Buy Price": "Price", "Avg Price": "Price", "Quantity": "Qty"})
+                    positions_snapshot = "Side" not in imp.columns
+                    if positions_snapshot:
+                        imp["Side"] = "BUY"
                     missing = [c for c in ("Symbol", "Side", "Qty", "Price") if c not in imp.columns]
                     if missing:
                         st.error(f"Missing column(s): {', '.join(missing)}")
@@ -2069,6 +2076,12 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
                         imp = imp[["Timestamp", "Portfolio", "Symbol", "Side", "Qty", "Price", "Amount"]]
 
                         existing = load_paper_trades()
+                        if positions_snapshot:
+                            # A positions snapshot has no trade dates, so avoid doubling up:
+                            # skip symbols this portfolio already holds.
+                            held, _, _ = compute_paper_positions(existing, active_portfolio, 0)
+                            held_syms = {s for s, p in held.items() if p["qty"] > 0}
+                            imp = imp[~imp["Symbol"].isin(held_syms)]
                         key_cols = ["Timestamp", "Portfolio", "Symbol", "Side", "Qty", "Price"]
                         if not existing.empty:
                             seen = set(map(tuple, existing[key_cols].assign(
