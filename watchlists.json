@@ -1,0 +1,46 @@
+{
+  "My Watchlist": {
+    "stocks": [
+      {
+        "Rank": 1,
+        "Symbol": "UBL",
+        "Score": 398
+      },
+      {
+        "Rank": 2,
+        "Symbol": "BLS",
+        "Score": 397
+      },
+      {
+        "Rank": 3,
+        "Symbol": "IRCTC",
+        "Score": 396
+      },
+      {
+        "Rank": 4,
+        "Symbol": "EMAMILTD",
+        "Score": 395
+      },
+      {
+        "Rank": 5,
+        "Symbol": "BATAINDIA",
+        "Score": 394
+      },
+      {
+        "Rank": 6,
+        "Symbol": "AFCONS",
+        "Score": 393
+      },
+      {
+        "Rank": 7,
+        "Symbol": "SYNGENE",
+        "Score": 392
+      }
+    ],
+    "linked_portfolio": "Test1"
+  },
+  "Test2": {
+    "stocks": [],
+    "linked_portfolio": "Test1"
+  }
+}
