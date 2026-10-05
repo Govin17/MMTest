@@ -2040,6 +2040,53 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
         # -- Trade history --------------------------------------------------
         port_trades = trades[trades["Portfolio"] == active_portfolio] if not trades.empty else trades
         with st.expander(f"Trade History — {active_portfolio} ({len(port_trades)})", expanded=False):
+            # -- Import trades from CSV/Excel (e.g. a previous export) ------
+            st.markdown("**Import trades**")
+            st.caption(f"Needs columns: Symbol, Side (BUY/SELL), Qty, Price. Optional: Timestamp, Amount. "
+                       f"All rows are added to \"{active_portfolio}\"; exact duplicates are skipped.")
+            imp_file = st.file_uploader("Trades file", type=["csv", "xlsx", "xls"], label_visibility="collapsed",
+                                        key=f"import_trades_{active_portfolio}")
+            if imp_file is not None and st.button("⬆️ Import into this portfolio", key=f"import_btn_{active_portfolio}"):
+                try:
+                    imp = pd.read_csv(imp_file) if imp_file.name.lower().endswith(".csv") else pd.read_excel(imp_file)
+                    imp.columns = [str(c).strip().title() for c in imp.columns]
+                    missing = [c for c in ("Symbol", "Side", "Qty", "Price") if c not in imp.columns]
+                    if missing:
+                        st.error(f"Missing column(s): {', '.join(missing)}")
+                    else:
+                        imp["Symbol"] = imp["Symbol"].astype(str).str.strip().str.upper().str.replace(".NS", "", regex=False)
+                        imp["Side"] = imp["Side"].astype(str).str.strip().str.upper()
+                        imp["Qty"] = pd.to_numeric(imp["Qty"], errors="coerce")
+                        imp["Price"] = pd.to_numeric(imp["Price"], errors="coerce")
+                        if "Timestamp" in imp.columns:
+                            imp["Timestamp"] = pd.to_datetime(imp["Timestamp"], errors="coerce")
+                        else:
+                            imp["Timestamp"] = pd.NaT
+                        imp["Timestamp"] = imp["Timestamp"].fillna(pd.Timestamp(datetime.now()))
+                        imp = imp[imp["Side"].isin(["BUY", "SELL"]) & imp["Qty"].gt(0) & imp["Price"].gt(0)].copy()
+                        imp["Portfolio"] = active_portfolio
+                        imp["Amount"] = imp["Qty"] * imp["Price"]
+                        imp = imp[["Timestamp", "Portfolio", "Symbol", "Side", "Qty", "Price", "Amount"]]
+
+                        existing = load_paper_trades()
+                        key_cols = ["Timestamp", "Portfolio", "Symbol", "Side", "Qty", "Price"]
+                        if not existing.empty:
+                            seen = set(map(tuple, existing[key_cols].assign(
+                                Timestamp=existing["Timestamp"].dt.floor("min")).values.tolist()))
+                            mask = [tuple(r) not in seen for r in imp[key_cols].assign(
+                                Timestamp=imp["Timestamp"].dt.floor("min")).values.tolist()]
+                            imp = imp[mask]
+                        if imp.empty:
+                            st.info("Nothing new to import — all rows already exist.")
+                        else:
+                            combined_trades = pd.concat([existing, imp], ignore_index=True)
+                            combined_trades.to_csv(PAPER_TRADES_FILE, index=False)
+                            st.success(f"Imported {len(imp)} trade(s) into {active_portfolio}.")
+                            st.rerun()
+                except Exception as e:
+                    st.error(f"Couldn't read that file: {e}")
+            st.divider()
+
             if port_trades.empty:
                 st.caption("No trades yet in this portfolio.")
             else:
