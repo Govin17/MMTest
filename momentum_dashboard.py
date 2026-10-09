@@ -702,6 +702,105 @@ def fetch_technicals(symbols):
 
 
 # ---------------------------------------------------------------------------
+# Momentum scanner — universe store + per-stock metrics
+# ---------------------------------------------------------------------------
+SCANNER_UNIVERSE_FILE = "scanner_universe.json"
+
+
+def load_scanner_universe():
+    try:
+        with open(SCANNER_UNIVERSE_FILE) as f:
+            data = json.load(f)
+            if data.get("symbols"):
+                return data
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return {"symbols": [], "uploaded_on": None}
+
+
+def save_scanner_universe(symbols):
+    data = {"symbols": symbols, "uploaded_on": datetime.now().strftime("%d %b %Y")}
+    with open(SCANNER_UNIVERSE_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+    return data
+
+
+def _ret_over_months(close, months):
+    """% return from the last close at/before (latest date minus N calendar months) to the
+    latest close, plus the std-dev of daily % moves over that same window.
+    Returns (None, None) when the stock doesn't have that much history."""
+    last_dt = close.index[-1]
+    target = last_dt - pd.DateOffset(months=months)
+    past = close[close.index <= target]
+    if past.empty:
+        return None, None
+    base = float(past.iloc[-1])
+    if not base:
+        return None, None
+    ret = (float(close.iloc[-1]) / base - 1) * 100
+    daily = close.pct_change()
+    vol = daily[daily.index > target].std() * 100
+    return ret, (float(vol) if pd.notna(vol) else None)
+
+
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def fetch_scan_metrics(symbols):
+    """Raw per-stock momentum metrics for a universe (tuple of NSE symbols, no .NS suffix).
+    Downloads in batches of 100. The weighted score / ranking is done in the UI so the
+    weights can be changed without refetching."""
+    tickers = [s + ".NS" for s in symbols]
+    data = {}
+    for i in range(0, len(tickers), 100):
+        data.update(_batch_download(tickers[i:i + 100], period="1y"))
+
+    rows = []
+    for sym in symbols:
+        hist = data.get(sym + ".NS")
+        if hist is None or hist.empty or "Close" not in hist or len(hist) < 20:
+            rows.append({"Symbol": sym, "Valid": False, "Reason": "No price data"})
+            continue
+        try:
+            close = hist["Close"]
+            cmp = float(close.iloc[-1])
+            prev = float(close.iloc[-2]) if len(close) > 1 else cmp
+            r6, v6 = _ret_over_months(close, 6)
+            r3, v3 = _ret_over_months(close, 3)
+            r1, v1 = _ret_over_months(close, 1)
+            if r6 is None or r3 is None or r1 is None:
+                rows.append({"Symbol": sym, "Valid": False, "Reason": "Less than 6M history"})
+                continue
+
+            win6 = close[close.index > close.index[-1] - pd.DateOffset(months=6)]
+            avg_daily = float(win6.pct_change().mean() * 100)
+            max_dd = float((win6 / win6.cummax() - 1).min() * 100)
+            high52 = float(hist["High"].max())
+            from_high = (cmp / high52 - 1) * 100 if high52 else None
+            avg_val_cr = float((close * hist["Volume"]).tail(20).mean() / 1e7)
+
+            ema20 = ema50 = None
+            if len(close) >= 50:
+                ema20 = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
+                ema50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
+            if ema20 is not None:
+                trend = f"{'▲' if cmp > ema20 else '▼'}20 {'▲' if cmp > ema50 else '▼'}50"
+            else:
+                trend = "—"
+
+            rows.append({
+                "Symbol": sym, "Valid": True, "Reason": "",
+                "CMP": round(cmp, 2),
+                "Day %": ((cmp - prev) / prev * 100) if prev else None,
+                "R6": r6, "R3": r3, "R1": r1,
+                "V6": v6, "V3": v3, "V1": v1,
+                "AvgDaily6M": avg_daily, "MaxDD6M": max_dd, "FromHigh": from_high,
+                "AvgValCr": avg_val_cr, "Trend": trend, "VCP": detect_vcp(hist),
+            })
+        except Exception:
+            rows.append({"Symbol": sym, "Valid": False, "Reason": "Calculation error"})
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
 # Watchlist store (multiple, named watchlists) — watchlists.json
 # { "name": {"stocks": [{"Symbol","Rank","Score"}], "linked_portfolio": "name or null"} }
 # ---------------------------------------------------------------------------
@@ -903,6 +1002,7 @@ with c2:
         fetch_technicals.clear()
         fetch_paper_value_series.clear()
         fetch_market_regime.clear()
+        fetch_scan_metrics.clear()
         st.rerun()
 
 holdings_store = load_holdings_store()
@@ -2114,10 +2214,157 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
                     st.rerun()
 
 
+# =============================================================================
+# TAB: Scanner — rank an NSE universe by the weighted momentum formula
+# =============================================================================
+def render_scanner_tab():
+    st.caption("Ranks your uploaded universe (e.g. Nifty MidSmallCap 400) by weighted 6M/3M/1M returns — "
+               "the same formula family you backtested. Prices from Yahoo Finance, cached for 6 hours.")
+
+    # -- Universe ---------------------------------------------------------
+    uni = load_scanner_universe()
+    symbols = uni["symbols"]
+    u1, u2 = st.columns([2, 1])
+    with u1:
+        up = st.file_uploader("Universe file (NSE index constituents CSV — needs a 'Symbol' column)",
+                              type=["csv", "xlsx", "xls"], key="scanner_universe_upload")
+        if up is not None:
+            try:
+                udf = pd.read_csv(up) if up.name.lower().endswith(".csv") else pd.read_excel(up)
+                cols = {str(c).strip().lower(): c for c in udf.columns}
+                if "symbol" not in cols:
+                    st.error("Couldn't find a 'Symbol' column in that file.")
+                else:
+                    new_syms = (udf[cols["symbol"]].astype(str).str.strip().str.upper()
+                                .str.replace(".NS", "", regex=False))
+                    new_syms = [s for s in dict.fromkeys(new_syms) if s and s != "NAN"]
+                    st.caption(f"Found {len(new_syms)} symbols in the file.")
+                    if st.button("Use this as the scanner universe", key="scanner_universe_save"):
+                        uni = save_scanner_universe(new_syms)
+                        st.session_state.pop("scan_raw", None)
+                        st.rerun()
+            except Exception as e:
+                st.error(f"Couldn't read that file: {e}")
+    with u2:
+        if symbols:
+            st.metric("Universe", f"{len(symbols)} stocks")
+            st.caption(f"Uploaded {uni['uploaded_on']} — refresh after NSE's Mar/Sep rebalance.")
+        else:
+            st.info("Upload a universe file to begin.")
+    if not symbols:
+        return
+
+    # -- Regime -----------------------------------------------------------
+    regime = fetch_market_regime()
+    if regime:
+        if regime["bullish"]:
+            st.success("Market regime: BULLISH (Supertrend 1, 2.5 on Nifty 500) — strategy is in the market.")
+        else:
+            st.error("Market regime: BEARISH (Supertrend 1, 2.5 on Nifty 500) — strategy sits out. "
+                     "Ranking below is for reference only.")
+
+    # -- Controls ---------------------------------------------------------
+    c1, c2, c3, c4, c5 = st.columns(5)
+    w6 = c1.number_input("6M weight", 0, 100, 50, step=5, key="scan_w6")
+    w3 = c2.number_input("3M weight", 0, 100, 30, step=5, key="scan_w3")
+    w1 = c3.number_input("1M weight", 0, 100, 20, step=5, key="scan_w1")
+    top_n = c4.number_input("Hold top N", 1, 50, 10, key="scan_topn")
+    exit_rank = c5.number_input("Exit rank", 1, 100, 25, key="scan_exit")
+    d1, d2 = st.columns([2, 1])
+    mode = d1.selectbox("Score type", [
+        "Return only (weighted 6M/3M/1M)",
+        "Return ÷ (1M + 3M volatility)",
+        "Return ÷ (1M + 3M + 6M volatility)",
+    ], key="scan_mode")
+    min_val = d2.number_input("Min avg traded value (₹ Cr/day)", 0.0, 500.0, 0.0, step=0.5, key="scan_minval")
+
+    run = st.button("🔍 Run scan", key="scan_run", type="primary")
+    if run:
+        with st.spinner(f"Fetching {len(symbols)} stocks from Yahoo Finance… (first run can take a minute)"):
+            st.session_state["scan_raw"] = fetch_scan_metrics(tuple(symbols))
+            st.session_state["scan_time"] = datetime.now().strftime("%d %b %Y, %H:%M")
+    if "scan_raw" not in st.session_state:
+        st.caption("Click **Run scan** to fetch prices and rank the universe.")
+        return
+
+    raw = st.session_state["scan_raw"].copy()
+    st.caption(f"Scan data as of {st.session_state.get('scan_time', '—')}.")
+
+    # -- Score & rank -----------------------------------------------------
+    valid = raw[raw["Valid"] == True].copy()
+    wsum = (w6 + w3 + w1) or 1
+    valid["ReturnScore"] = (w6 * valid["R6"] + w3 * valid["R3"] + w1 * valid["R1"]) / wsum
+    if mode.startswith("Return only"):
+        valid["Score"] = valid["ReturnScore"]
+    elif "6M volatility" in mode:
+        valid["Score"] = valid["ReturnScore"] / (valid["V1"] + valid["V3"] + valid["V6"])
+    else:
+        valid["Score"] = valid["ReturnScore"] / (valid["V1"] + valid["V3"])
+    valid = valid.replace([float("inf"), float("-inf")], pd.NA).dropna(subset=["Score"])
+    valid = valid[valid["AvgValCr"] >= min_val]
+    valid = valid.sort_values("Score", ascending=False).reset_index(drop=True)
+    valid["Rank"] = valid.index + 1
+
+    held = set(holdings_store.keys())
+    valid["Status"] = valid["Rank"].apply(
+        lambda r: f"🟢 Top {int(top_n)}" if r <= top_n else ("🟡 Hold zone" if r <= exit_rank else ""))
+    valid["Held"] = valid["Symbol"].apply(lambda s: "✅" if s in held else "")
+
+    # -- Rebalance view ---------------------------------------------------
+    rank_of = dict(zip(valid["Symbol"], valid["Rank"]))
+    buy_list = valid[(valid["Rank"] <= top_n) & (~valid["Symbol"].isin(held))]["Symbol"].tolist()
+    sell_list = [f"{s} (#{int(rank_of[s])})" if s in rank_of else f"{s} (unranked)"
+                 for s in sorted(held) if s not in rank_of or rank_of[s] > exit_rank]
+    rb1, rb2 = st.columns(2)
+    with rb1:
+        st.markdown(f"**Buy candidates** — in top {int(top_n)}, not held ({len(buy_list)})")
+        st.write(", ".join(buy_list) if buy_list else "None — you hold every top-ranked stock.")
+    with rb2:
+        st.markdown(f"**Sell candidates** — held, ranked below {int(exit_rank)} ({len(sell_list)})")
+        st.write(", ".join(sell_list) if sell_list else "None — all holdings are inside the exit rank.")
+
+    # -- Ranking table ----------------------------------------------------
+    show = valid[["Rank", "Symbol", "Status", "Held", "Score", "R6", "R3", "R1", "CMP", "Day %",
+                  "V3", "FromHigh", "MaxDD6M", "AvgDaily6M", "AvgValCr", "Trend", "VCP"]].copy()
+    show["VCP"] = show["VCP"].apply(lambda v: "Yes" if v else "No")
+    show = show.rename(columns={
+        "R6": "6M %", "R3": "3M %", "R1": "1M %", "V3": "Vol 3M (daily %)",
+        "FromHigh": "From 52W High %", "MaxDD6M": "Max DD 6M %",
+        "AvgDaily6M": "Avg Daily Ret 6M %", "AvgValCr": "Avg Traded ₹Cr",
+    })
+    num_cols = ["Score", "6M %", "3M %", "1M %", "CMP", "Day %", "Vol 3M (daily %)",
+                "From 52W High %", "Max DD 6M %", "Avg Daily Ret 6M %", "Avg Traded ₹Cr"]
+    st.dataframe(
+        show, use_container_width=True, hide_index=True, height=520,
+        column_config={c: st.column_config.NumberColumn(c, format="%.2f") for c in num_cols},
+    )
+    export_buttons(show, "momentum_scan", "export_scan")
+
+    skipped = raw[raw["Valid"] != True]
+    if len(skipped):
+        with st.expander(f"Excluded from ranking ({len(skipped)}) — missing data or under 6 months of history"):
+            st.dataframe(skipped[["Symbol", "Reason"]], use_container_width=True, hide_index=True)
+
+    # -- Compare with Sigma ----------------------------------------------
+    with st.expander("Compare with Sigma Scanner's list"):
+        pasted = st.text_area("Paste Sigma's top symbols (comma, space or new-line separated)", key="scan_sigma_paste")
+        sig = [s.strip().upper().replace(".NS", "") for s in pd.Series(pasted.replace(",", " ").split()).tolist() if s.strip()]
+        sig = list(dict.fromkeys(sig))
+        if sig:
+            ours = valid.head(len(sig))["Symbol"].tolist()
+            both = [s for s in sig if s in ours]
+            only_sigma = [s for s in sig if s not in ours]
+            only_ours = [s for s in ours if s not in sig]
+            st.write(f"**Overlap: {len(both)} of {len(sig)}** (our top {len(sig)} vs Sigma's list)")
+            st.write(f"Only in Sigma: {', '.join(only_sigma) or '—'}")
+            st.write(f"Only in ours: {', '.join(only_ours) or '—'}")
+
+
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
-tab_holdings, tab_watchlist, tab_paper = st.tabs(["📊 Holdings", "🔭 Watchlist", "📝 Paper Trading"])
+tab_holdings, tab_watchlist, tab_paper, tab_scanner = st.tabs(
+    ["📊 Holdings", "🔭 Watchlist", "📝 Paper Trading", "🧭 Scanner"])
 
 with tab_holdings:
     render_holdings_tab()
@@ -2127,3 +2374,6 @@ with tab_watchlist:
 
 with tab_paper:
     render_paper_trading_tab()
+
+with tab_scanner:
+    render_scanner_tab()
