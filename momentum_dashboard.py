@@ -2340,6 +2340,10 @@ def render_scanner_tab():
     .scan-tag.held {{ background:{ACCENT}33; color:{ACCENT}; }}
     .scan-card {{ background:{CARD_ALT}; border:1px solid {BORDER}; border-radius:10px; padding:14px 18px; height:100%; }}
     .scan-card .t {{ font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }}
+    .st-key-scan_side {{ background:{CARD_ALT}; border:1px solid {BORDER}; border-radius:10px; padding:14px 14px 6px; }}
+    .scan-side-title {{ font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:{MUTED}; margin-bottom:8px; }}
+    .st-key-scan_side label, .st-key-scan_side [data-testid="stWidgetLabel"] p {{ font-size:12.5px !important; color:{MUTED} !important; }}
+    .st-key-scan_side [data-testid="stHorizontalBlock"] {{ gap:8px !important; }}
     .scan-card .b {{ font-size:15.5px; line-height:1.6; color:{INK}; }}
     </style>""", unsafe_allow_html=True)
 
@@ -2380,30 +2384,33 @@ def render_scanner_tab():
                 "the latest days.")
         return
 
-    # ---- Settings (one place, collapsed) ----------------------------------
-    with st.expander("⚙️ Formula & filters"):
-        s1, s2, s3 = st.columns(3)
-        w6 = s1.number_input("6M weight", 0, 100, 50, step=5, key="scan_w6")
-        w3 = s2.number_input("3M weight", 0, 100, 30, step=5, key="scan_w3")
-        w1 = s3.number_input("1M weight", 0, 100, 20, step=5, key="scan_w1")
-        s4, s5, s6 = st.columns(3)
-        top_n = s4.number_input("Hold top N", 1, 50, 10, key="scan_topn")
-        exit_rank = s5.number_input("Exit below rank", 1, 100, 25, key="scan_exit")
-        min_val = s6.number_input("Min traded value (₹ Cr/day)", 0.0, 500.0, 0.0, step=0.5, key="scan_minval")
-        mode = st.selectbox("Score type", [
-            "Return only (weighted 6M/3M/1M)",
-            "Return ÷ (1M + 3M volatility)",
-            "Return ÷ (1M + 3M + 6M volatility)",
-        ], key="scan_mode")
+    # ---- Layout: stock list on the left, compact settings panel on the right
+    main, side = st.columns([3.6, 1.1], gap="medium")
+    with side:
+        with st.container(key="scan_side"):
+            st.markdown("<div class='scan-side-title'>Formula &amp; filters</div>", unsafe_allow_html=True)
+            c1, c2, c3 = st.columns(3)
+            w6 = c1.number_input("6M %", 0, 100, 50, step=5, key="scan_w6")
+            w3 = c2.number_input("3M %", 0, 100, 30, step=5, key="scan_w3")
+            w1 = c3.number_input("1M %", 0, 100, 20, step=5, key="scan_w1")
+            d1, d2 = st.columns(2)
+            top_n = d1.number_input("Hold top", 1, 50, 10, key="scan_topn")
+            exit_rank = d2.number_input("Exit below", 1, 100, 25, key="scan_exit")
+            min_val = st.number_input("Min traded ₹Cr/day", 0.0, 500.0, 0.0, step=0.5, key="scan_minval")
+            mode = st.selectbox("Score type", [
+                "Return only",
+                "Return ÷ (1M+3M vol)",
+                "Return ÷ (1M+3M+6M vol)",
+            ], key="scan_mode")
 
     # ---- Score & rank -----------------------------------------------------
     raw = st.session_state["scan_raw"].copy()
-    valid = raw[raw["Valid"] == True].rename(columns={"Day %": "DayPct"}).copy()
+    valid = raw[raw["Valid"] == True].copy()
     wsum = (w6 + w3 + w1) or 1
     valid["ReturnScore"] = (w6 * valid["R6"] + w3 * valid["R3"] + w1 * valid["R1"]) / wsum
     if mode.startswith("Return only"):
         valid["Score"] = valid["ReturnScore"]
-    elif "6M volatility" in mode:
+    elif "6M vol" in mode:
         valid["Score"] = valid["ReturnScore"] / (valid["V1"] + valid["V3"] + valid["V6"])
     else:
         valid["Score"] = valid["ReturnScore"] / (valid["V1"] + valid["V3"])
@@ -2414,106 +2421,107 @@ def render_scanner_tab():
     top_n, exit_rank = int(top_n), int(exit_rank)
     held = set(holdings_store.keys())
 
-    st.caption(f"Score = {w6}% 6M + {w3}% 3M + {w1}% 1M   ·   Hold top {top_n}, exit below rank {exit_rank}   ·   "
-               f"{len(valid)} stocks ranked")
+    with main:
+        st.caption(f"Score = {w6}% 6M + {w3}% 3M + {w1}% 1M   ·   Hold top {top_n}, exit below rank {exit_rank}   ·   "
+                   f"{len(valid)} stocks ranked")
 
-    # ---- What to do: buy / sell candidates --------------------------------
-    rank_of = dict(zip(valid["Symbol"], valid["Rank"]))
-    buys = [f"{r.Symbol} (#{int(r.Rank)})" for r in valid[valid["Rank"] <= top_n].itertuples() if r.Symbol not in held]
-    sells = [f"{s} (#{int(rank_of[s])})" if s in rank_of else f"{s} (unranked)"
-             for s in sorted(held) if s not in rank_of or rank_of[s] > exit_rank]
-    b1, b2 = st.columns(2)
-    b1.markdown(f"<div class='scan-card'><div class='t' style='color:{GREEN}'>Buy — in top {top_n}, not held "
-                f"({len(buys)})</div><div class='b'>{', '.join(buys) if buys else 'Nothing to buy — you hold every top-ranked stock.'}"
-                f"</div></div>", unsafe_allow_html=True)
-    b2.markdown(f"<div class='scan-card'><div class='t' style='color:{RED}'>Sell — held, ranked below {exit_rank} "
-                f"({len(sells)})</div><div class='b'>{', '.join(sells) if sells else 'Nothing to sell — all holdings are inside the exit rank.'}"
-                f"</div></div>", unsafe_allow_html=True)
+        # ---- What to do: buy / sell candidates --------------------------------
+        rank_of = dict(zip(valid["Symbol"], valid["Rank"]))
+        buys = [f"{r.Symbol} (#{int(r.Rank)})" for r in valid[valid["Rank"] <= top_n].itertuples() if r.Symbol not in held]
+        sells = [f"{s} (#{int(rank_of[s])})" if s in rank_of else f"{s} (unranked)"
+                 for s in sorted(held) if s not in rank_of or rank_of[s] > exit_rank]
+        b1, b2 = st.columns(2)
+        b1.markdown(f"<div class='scan-card'><div class='t' style='color:{GREEN}'>Buy — in top {top_n}, not held "
+                    f"({len(buys)})</div><div class='b'>{', '.join(buys) if buys else 'Nothing to buy — you hold every top-ranked stock.'}"
+                    f"</div></div>", unsafe_allow_html=True)
+        b2.markdown(f"<div class='scan-card'><div class='t' style='color:{RED}'>Sell — held, ranked below {exit_rank} "
+                    f"({len(sells)})</div><div class='b'>{', '.join(sells) if sells else 'Nothing to sell — all holdings are inside the exit rank.'}"
+                    f"</div></div>", unsafe_allow_html=True)
 
-    st.write("")
+        st.write("")
 
-    # ---- Ranking table ----------------------------------------------------
-    f1, f2, f3 = st.columns([2, 1, 1], vertical_alignment="center")
-    query = f1.text_input("Search", placeholder="Search a stock…", label_visibility="collapsed", key="scan_search").strip().upper()
-    n_show = f2.selectbox("Rows", [25, 50, 100, "All"], index=1, label_visibility="collapsed", key="scan_rows",
-                          format_func=lambda v: f"Top {v}" if v != "All" else "All stocks")
-    more = f3.toggle("More columns", key="scan_more")
+        # ---- Ranking table ----------------------------------------------------
+        f1, f2, f3 = st.columns([2, 1, 1], vertical_alignment="center")
+        query = f1.text_input("Search", placeholder="Search a stock…", label_visibility="collapsed", key="scan_search").strip().upper()
+        n_show = f2.selectbox("Rows", [25, 50, 100, "All"], index=1, label_visibility="collapsed", key="scan_rows",
+                              format_func=lambda v: f"Top {v}" if v != "All" else "All stocks")
+        more = f3.toggle("More columns", key="scan_more")
 
-    view = valid[valid["Symbol"].str.contains(query, regex=False)] if query else (
-        valid if n_show == "All" else valid.head(int(n_show)))
+        view = valid[valid["Symbol"].str.contains(query, regex=False)] if query else (
+            valid if n_show == "All" else valid.head(int(n_show)))
 
-    def pct(v, d=1):
-        if v is None or pd.isna(v):
-            return f"<span style='color:{MUTED}'>—</span>"
-        c = GREEN if v > 0 else (RED if v < 0 else MUTED)
-        return f"<span style='color:{c}'>{v:+.{d}f}%</span>"
+        def pct(v, d=1):
+            if v is None or pd.isna(v):
+                return f"<span style='color:{MUTED}'>—</span>"
+            c = GREEN if v > 0 else (RED if v < 0 else MUTED)
+            return f"<span style='color:{c}'>{v:+.{d}f}%</span>"
 
-    heads = [("#", ""), ("Stock", "l"), ("Score", ""), ("6M", ""), ("3M", ""), ("1M", ""), ("Price ₹", ""),
-             ("Day", ""), ("From high", ""), ("Trend", ""), ("VCP", "")]
-    if more:
-        heads += [("Volatility 3M", ""), ("Max drawdown 6M", ""), ("Avg daily ret", ""), ("Traded ₹Cr/day", "")]
-    thead = "".join(f"<th class='{c}'>{h}</th>" for h, c in heads)
-
-    rows_html = []
-    for r in view.itertuples():
-        cls = "top" if r.Rank <= top_n else ("hold" if r.Rank <= exit_rank else "")
-        tag = "<span class='scan-tag held'>HELD</span>" if r.Symbol in held else ""
-        ups = str(r.Trend).count("▲")
-        tcol = GREEN if ups == 2 else (RED if "▼" in str(r.Trend) and ups == 0 else MUTED)
-        vcp = f"<span style='color:{ACCENT};font-weight:700'>Yes</span>" if r.VCP else f"<span style='color:{MUTED}'>No</span>"
-        cells = [
-            f"<td class='n'>{int(r.Rank)}</td>",
-            f"<td class='l'><b>{r.Symbol}</b>{tag}</td>",
-            f"<td class='n'><b>{r.Score:.2f}</b></td>",
-            f"<td class='n'>{pct(r.R6)}</td>", f"<td class='n'>{pct(r.R3)}</td>", f"<td class='n'>{pct(r.R1)}</td>",
-            f"<td class='n'>{r.CMP:,.2f}</td>",
-            f"<td class='n'>{pct(r.DayPct)}</td>",
-            f"<td class='n'>{pct(r.FromHigh)}</td>",
-            f"<td class='n' style='color:{tcol}'>{r.Trend}</td>",
-            f"<td class='n'>{vcp}</td>",
-        ]
+        heads = [("#", ""), ("Stock", "l"), ("Score", ""), ("6M", ""), ("3M", ""), ("1M", ""), ("Price ₹", ""),
+                 ("Day", ""), ("From high", ""), ("Trend", ""), ("VCP", "")]
         if more:
-            cells += [
-                f"<td class='n'>{r.V3:.2f}%</td>", f"<td class='n'>{pct(r.MaxDD6M)}</td>",
-                f"<td class='n'>{pct(r.AvgDaily6M, 2)}</td>", f"<td class='n'>{r.AvgValCr:,.1f}</td>",
+            heads += [("Volatility 3M", ""), ("Max drawdown 6M", ""), ("Avg daily ret", ""), ("Traded ₹Cr/day", "")]
+        thead = "".join(f"<th class='{c}'>{h}</th>" for h, c in heads)
+
+        rows_html = []
+        for r in view.itertuples():
+            cls = "top" if r.Rank <= top_n else ("hold" if r.Rank <= exit_rank else "")
+            tag = "<span class='scan-tag held'>HELD</span>" if r.Symbol in held else ""
+            ups = str(r.Trend).count("▲")
+            tcol = GREEN if ups == 2 else (RED if "▼" in str(r.Trend) and ups == 0 else MUTED)
+            vcp = f"<span style='color:{ACCENT};font-weight:700'>Yes</span>" if r.VCP else f"<span style='color:{MUTED}'>No</span>"
+            cells = [
+                f"<td class='n'>{int(r.Rank)}</td>",
+                f"<td class='l'><b>{r.Symbol}</b>{tag}</td>",
+                f"<td class='n'><b>{r.Score:.2f}</b></td>",
+                f"<td class='n'>{pct(r.R6)}</td>", f"<td class='n'>{pct(r.R3)}</td>", f"<td class='n'>{pct(r.R1)}</td>",
+                f"<td class='n'>{r.CMP:,.2f}</td>",
+                f"<td class='n'>{pct(getattr(r, '_9', None) if False else raw.loc[raw['Symbol'] == r.Symbol, 'Day %'].iloc[0])}</td>",
+                f"<td class='n'>{pct(r.FromHigh)}</td>",
+                f"<td class='n' style='color:{tcol}'>{r.Trend}</td>",
+                f"<td class='n'>{vcp}</td>",
             ]
-        rows_html.append(f"<tr class='{cls}'>{''.join(cells)}</tr>")
+            if more:
+                cells += [
+                    f"<td class='n'>{r.V3:.2f}%</td>", f"<td class='n'>{pct(r.MaxDD6M)}</td>",
+                    f"<td class='n'>{pct(r.AvgDaily6M, 2)}</td>", f"<td class='n'>{r.AvgValCr:,.1f}</td>",
+                ]
+            rows_html.append(f"<tr class='{cls}'>{''.join(cells)}</tr>")
 
-    if rows_html:
-        st.markdown(f"<div class='scan-wrap'><table class='scan-table'><thead><tr>{thead}</tr></thead>"
-                    f"<tbody>{''.join(rows_html)}</tbody></table></div>", unsafe_allow_html=True)
-        st.caption(f"Green bar = top {top_n} (hold)   ·   Blue bar = hold zone (rank {top_n + 1}–{exit_rank})   ·   "
-                   f"Showing {len(rows_html)} of {len(valid)}")
-    else:
-        st.info("No stocks match.")
+        if rows_html:
+            st.markdown(f"<div class='scan-wrap'><table class='scan-table'><thead><tr>{thead}</tr></thead>"
+                        f"<tbody>{''.join(rows_html)}</tbody></table></div>", unsafe_allow_html=True)
+            st.caption(f"Green bar = top {top_n} (hold)   ·   Blue bar = hold zone (rank {top_n + 1}–{exit_rank})   ·   "
+                       f"Showing {len(rows_html)} of {len(valid)}")
+        else:
+            st.info("No stocks match.")
 
-    # ---- Tools: export · universe · compare with Sigma --------------------
-    with st.expander("More: export · universe · compare with Sigma"):
-        export_df = valid[["Rank", "Symbol", "Score", "R6", "R3", "R1", "CMP", "FromHigh", "V3", "MaxDD6M",
-                           "AvgDaily6M", "AvgValCr", "Trend", "VCP"]].rename(columns={
-            "R6": "6M %", "R3": "3M %", "R1": "1M %", "FromHigh": "From 52W High %", "V3": "Vol 3M (daily %)",
-            "MaxDD6M": "Max DD 6M %", "AvgDaily6M": "Avg Daily Ret 6M %", "AvgValCr": "Avg Traded ₹Cr"})
-        st.markdown("**Export full ranking**")
-        export_buttons(export_df, "momentum_scan", "export_scan")
+        # ---- Tools: export · universe · compare with Sigma --------------------
+        with st.expander("More: export · universe · compare with Sigma"):
+            export_df = valid[["Rank", "Symbol", "Score", "R6", "R3", "R1", "CMP", "FromHigh", "V3", "MaxDD6M",
+                               "AvgDaily6M", "AvgValCr", "Trend", "VCP"]].rename(columns={
+                "R6": "6M %", "R3": "3M %", "R1": "1M %", "FromHigh": "From 52W High %", "V3": "Vol 3M (daily %)",
+                "MaxDD6M": "Max DD 6M %", "AvgDaily6M": "Avg Daily Ret 6M %", "AvgValCr": "Avg Traded ₹Cr"})
+            st.markdown("**Export full ranking**")
+            export_buttons(export_df, "momentum_scan", "export_scan")
 
-        st.markdown("**Universe**")
-        st.caption(f"{len(symbols)} stocks, uploaded {uni['uploaded_on']}. Replace it after NSE's March / September rebalance.")
-        _scanner_universe_uploader("tools")
+            st.markdown("**Universe**")
+            st.caption(f"{len(symbols)} stocks, uploaded {uni['uploaded_on']}. Replace it after NSE's March / September rebalance.")
+            _scanner_universe_uploader("tools")
 
-        st.markdown("**Compare with Sigma Scanner**")
-        pasted = st.text_area("Paste Sigma's top symbols (comma, space or new-line separated)", key="scan_sigma_paste")
-        sig = list(dict.fromkeys(s.strip().upper().replace(".NS", "") for s in pasted.replace(",", " ").split() if s.strip()))
-        if sig:
-            ours = valid.head(len(sig))["Symbol"].tolist()
-            both = [s for s in sig if s in ours]
-            st.write(f"**Overlap: {len(both)} of {len(sig)}** (our top {len(sig)} vs Sigma's list)")
-            st.write(f"Only in Sigma: {', '.join(s for s in sig if s not in ours) or '—'}")
-            st.write(f"Only in ours: {', '.join(s for s in ours if s not in sig) or '—'}")
+            st.markdown("**Compare with Sigma Scanner**")
+            pasted = st.text_area("Paste Sigma's top symbols (comma, space or new-line separated)", key="scan_sigma_paste")
+            sig = list(dict.fromkeys(s.strip().upper().replace(".NS", "") for s in pasted.replace(",", " ").split() if s.strip()))
+            if sig:
+                ours = valid.head(len(sig))["Symbol"].tolist()
+                both = [s for s in sig if s in ours]
+                st.write(f"**Overlap: {len(both)} of {len(sig)}** (our top {len(sig)} vs Sigma's list)")
+                st.write(f"Only in Sigma: {', '.join(s for s in sig if s not in ours) or '—'}")
+                st.write(f"Only in ours: {', '.join(s for s in ours if s not in sig) or '—'}")
 
-        skipped = raw[raw["Valid"] != True]
-        if len(skipped):
-            st.markdown(f"**Excluded from ranking ({len(skipped)})** — missing data or under 6 months of history")
-            st.dataframe(skipped[["Symbol", "Reason"]], use_container_width=True, hide_index=True)
+            skipped = raw[raw["Valid"] != True]
+            if len(skipped):
+                st.markdown(f"**Excluded from ranking ({len(skipped)})** — missing data or under 6 months of history")
+                st.dataframe(skipped[["Symbol", "Reason"]], use_container_width=True, hide_index=True)
 
 
 # ---------------------------------------------------------------------------
