@@ -2288,94 +2288,117 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
 # =============================================================================
 # TAB: Scanner — rank an NSE universe by the weighted momentum formula
 # =============================================================================
-def render_scanner_tab():
-    st.caption("Ranks your uploaded universe (e.g. Nifty MidSmallCap 400) by weighted 6M/3M/1M returns — "
-               "the same formula family you backtested. Prices from Yahoo Finance, saved on disk and "
-               "topped up incrementally.")
+def _scanner_universe_uploader(key):
+    """Upload an NSE constituents file and save it as the scanner universe."""
+    up = st.file_uploader("Universe file (NSE index constituents CSV — needs a 'Symbol' column)",
+                          type=["csv", "xlsx", "xls"], key=f"scanner_universe_upload_{key}")
+    if up is None:
+        return
+    try:
+        udf = pd.read_csv(up) if up.name.lower().endswith(".csv") else pd.read_excel(up)
+        cols = {str(c).strip().lower(): c for c in udf.columns}
+        if "symbol" not in cols:
+            st.error("Couldn't find a 'Symbol' column in that file.")
+            return
+        new_syms = (udf[cols["symbol"]].astype(str).str.strip().str.upper().str.replace(".NS", "", regex=False))
+        new_syms = [s for s in dict.fromkeys(new_syms) if s and s != "NAN"]
+        st.caption(f"Found {len(new_syms)} symbols.")
+        if st.button("Use this as the scanner universe", key=f"scanner_universe_save_{key}"):
+            save_scanner_universe(new_syms)
+            st.session_state.pop("scan_raw", None)
+            st.rerun()
+    except Exception as e:
+        st.error(f"Couldn't read that file: {e}")
 
-    # -- Universe ---------------------------------------------------------
+
+def render_scanner_tab():
     uni = load_scanner_universe()
     symbols = uni["symbols"]
-    u1, u2 = st.columns([2, 1])
-    with u1:
-        up = st.file_uploader("Universe file (NSE index constituents CSV — needs a 'Symbol' column)",
-                              type=["csv", "xlsx", "xls"], key="scanner_universe_upload")
-        if up is not None:
-            try:
-                udf = pd.read_csv(up) if up.name.lower().endswith(".csv") else pd.read_excel(up)
-                cols = {str(c).strip().lower(): c for c in udf.columns}
-                if "symbol" not in cols:
-                    st.error("Couldn't find a 'Symbol' column in that file.")
-                else:
-                    new_syms = (udf[cols["symbol"]].astype(str).str.strip().str.upper()
-                                .str.replace(".NS", "", regex=False))
-                    new_syms = [s for s in dict.fromkeys(new_syms) if s and s != "NAN"]
-                    st.caption(f"Found {len(new_syms)} symbols in the file.")
-                    if st.button("Use this as the scanner universe", key="scanner_universe_save"):
-                        uni = save_scanner_universe(new_syms)
-                        st.session_state.pop("scan_raw", None)
-                        st.rerun()
-            except Exception as e:
-                st.error(f"Couldn't read that file: {e}")
-    with u2:
-        if symbols:
-            st.metric("Universe", f"{len(symbols)} stocks")
-            st.caption(f"Uploaded {uni['uploaded_on']} — refresh after NSE's Mar/Sep rebalance.")
-        else:
-            st.info("Upload a universe file to begin.")
+
+    # ---- First-time setup ------------------------------------------------
     if not symbols:
+        st.markdown("#### Set up the scanner")
+        st.caption("Upload the NSE Nifty MidSmallCap 400 constituents CSV once. You can replace it after each "
+                   "March / September index rebalance.")
+        _scanner_universe_uploader("setup")
         return
 
-    # -- Regime -----------------------------------------------------------
-    regime = fetch_market_regime()
-    if regime:
-        if regime["bullish"]:
-            st.success("Market regime: BULLISH (Supertrend 1, 2.5 on Nifty 500) — strategy is in the market.")
-        else:
-            st.error("Market regime: BEARISH (Supertrend 1, 2.5 on Nifty 500) — strategy sits out. "
-                     "Ranking below is for reference only.")
+    # ---- Styles (same fonts as the rest of the app, bigger and calmer) ----
+    st.markdown(f"""<style>
+    .scan-wrap {{ overflow:auto; max-height:620px; border:1px solid {BORDER}; border-radius:10px; background:{CARD_TABLE}; }}
+    .scan-table {{ width:100%; border-collapse:collapse; font-size:15px; min-width:780px; }}
+    .scan-table th {{ position:sticky; top:0; z-index:1; background:{CARD}; color:{MUTED}; font-size:12.5px;
+        font-weight:600; text-transform:uppercase; letter-spacing:.04em; padding:11px 12px; text-align:right;
+        border-bottom:1px solid {BORDER}; white-space:nowrap; }}
+    .scan-table td {{ padding:10px 12px; text-align:right; border-bottom:1px solid {BORDER}; white-space:nowrap; color:{INK}; }}
+    .scan-table th.l, .scan-table td.l {{ text-align:left; }}
+    .scan-table td.n {{ font-family:'IBM Plex Mono', monospace; font-size:14.5px; }}
+    .scan-table tr.top td:first-child {{ box-shadow: inset 4px 0 0 {GREEN}; }}
+    .scan-table tr.hold td:first-child {{ box-shadow: inset 4px 0 0 {ACCENT}; }}
+    .scan-table tbody tr:hover {{ background:{CARD_ALT}; }}
+    .scan-tag {{ font-size:11px; font-weight:700; padding:2px 7px; border-radius:999px; margin-left:8px; letter-spacing:.03em; }}
+    .scan-tag.held {{ background:{ACCENT}33; color:{ACCENT}; }}
+    .scan-card {{ background:{CARD_ALT}; border:1px solid {BORDER}; border-radius:10px; padding:14px 18px; height:100%; }}
+    .scan-card .t {{ font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }}
+    .scan-card .b {{ font-size:15.5px; line-height:1.6; color:{INK}; }}
+    </style>""", unsafe_allow_html=True)
 
-    # -- Controls ---------------------------------------------------------
-    c1, c2, c3, c4, c5 = st.columns(5)
-    w6 = c1.number_input("6M weight", 0, 100, 50, step=5, key="scan_w6")
-    w3 = c2.number_input("3M weight", 0, 100, 30, step=5, key="scan_w3")
-    w1 = c3.number_input("1M weight", 0, 100, 20, step=5, key="scan_w1")
-    top_n = c4.number_input("Hold top N", 1, 50, 10, key="scan_topn")
-    exit_rank = c5.number_input("Exit rank", 1, 100, 25, key="scan_exit")
-    d1, d2 = st.columns([2, 1])
-    mode = d1.selectbox("Score type", [
-        "Return only (weighted 6M/3M/1M)",
-        "Return ÷ (1M + 3M volatility)",
-        "Return ÷ (1M + 3M + 6M volatility)",
-    ], key="scan_mode")
-    min_val = d2.number_input("Min avg traded value (₹ Cr/day)", 0.0, 500.0, 0.0, step=0.5, key="scan_minval")
-
-    # Open instantly from the saved price store (no network); the button only tops it up.
+    # ---- Load saved prices instantly (no network) -------------------------
     if "scan_raw" not in st.session_state:
         store = load_scan_prices()
         if store["data"] and any((s + ".NS") in store["data"] for s in symbols):
             st.session_state["scan_raw"] = compute_scan_metrics(symbols, store["data"])
-            st.session_state["scan_time"] = store["saved"].strftime("%d %b %Y, %H:%M") if store["saved"] else "—"
-
+            st.session_state["scan_time"] = store["saved"].strftime("%d %b, %H:%M") if store["saved"] else "—"
     has_data = "scan_raw" in st.session_state
-    run = st.button("⚡ Update prices" if has_data else "🔍 Run scan (first time: downloads 1 year of prices)",
-                    key="scan_run", type="primary")
+
+    # ---- Top bar: regime · last updated · update button -------------------
+    regime = fetch_market_regime()
+    t1, t2, t3 = st.columns([3, 2, 1.3], vertical_alignment="center")
+    with t1:
+        if regime:
+            col = GREEN if regime["bullish"] else RED
+            txt = "BULLISH — strategy is in the market" if regime["bullish"] else "BEARISH — strategy sits out"
+            st.markdown(f"<div style='font-size:16px;font-weight:600'><span style='color:{col}'>●</span> "
+                        f"Market regime: <span style='color:{col}'>{txt}</span></div>", unsafe_allow_html=True)
+        else:
+            st.caption("Market regime unavailable right now.")
+    with t2:
+        if has_data:
+            st.caption(f"Prices updated {st.session_state.get('scan_time', '—')}")
+    with t3:
+        run = st.button("⚡ Update prices" if has_data else "Download prices", key="scan_run",
+                        type="primary", use_container_width=True)
     if run:
         bar = st.progress(0.0, text="Starting…")
         store = update_scan_prices(symbols, progress=lambda p, msg: bar.progress(min(p, 1.0), text=msg))
         st.session_state["scan_raw"] = compute_scan_metrics(symbols, store["data"])
-        st.session_state["scan_time"] = datetime.now().strftime("%d %b %Y, %H:%M")
+        st.session_state["scan_time"] = datetime.now().strftime("%d %b, %H:%M")
         bar.empty()
-    if "scan_raw" not in st.session_state:
-        st.caption("Click **Run scan** once to download prices. After that, updates only fetch the latest days.")
+        has_data = True
+    if not has_data:
+        st.info("Click **Download prices** once (first time takes about a minute). After that, updates only fetch "
+                "the latest days.")
         return
 
-    raw = st.session_state["scan_raw"].copy()
-    st.caption(f"Prices last updated: {st.session_state.get('scan_time', '—')}. "
-               f"Changing weights, top N or exit rank re-ranks instantly.")
+    # ---- Settings (one place, collapsed) ----------------------------------
+    with st.expander("⚙️ Formula & filters"):
+        s1, s2, s3 = st.columns(3)
+        w6 = s1.number_input("6M weight", 0, 100, 50, step=5, key="scan_w6")
+        w3 = s2.number_input("3M weight", 0, 100, 30, step=5, key="scan_w3")
+        w1 = s3.number_input("1M weight", 0, 100, 20, step=5, key="scan_w1")
+        s4, s5, s6 = st.columns(3)
+        top_n = s4.number_input("Hold top N", 1, 50, 10, key="scan_topn")
+        exit_rank = s5.number_input("Exit below rank", 1, 100, 25, key="scan_exit")
+        min_val = s6.number_input("Min traded value (₹ Cr/day)", 0.0, 500.0, 0.0, step=0.5, key="scan_minval")
+        mode = st.selectbox("Score type", [
+            "Return only (weighted 6M/3M/1M)",
+            "Return ÷ (1M + 3M volatility)",
+            "Return ÷ (1M + 3M + 6M volatility)",
+        ], key="scan_mode")
 
-    # -- Score & rank -----------------------------------------------------
-    valid = raw[raw["Valid"] == True].copy()
+    # ---- Score & rank -----------------------------------------------------
+    raw = st.session_state["scan_raw"].copy()
+    valid = raw[raw["Valid"] == True].rename(columns={"Day %": "DayPct"}).copy()
     wsum = (w6 + w3 + w1) or 1
     valid["ReturnScore"] = (w6 * valid["R6"] + w3 * valid["R3"] + w1 * valid["R1"]) / wsum
     if mode.startswith("Return only"):
@@ -2388,60 +2411,109 @@ def render_scanner_tab():
     valid = valid[valid["AvgValCr"] >= min_val]
     valid = valid.sort_values("Score", ascending=False).reset_index(drop=True)
     valid["Rank"] = valid.index + 1
-
+    top_n, exit_rank = int(top_n), int(exit_rank)
     held = set(holdings_store.keys())
-    valid["Status"] = valid["Rank"].apply(
-        lambda r: f"🟢 Top {int(top_n)}" if r <= top_n else ("🟡 Hold zone" if r <= exit_rank else ""))
-    valid["Held"] = valid["Symbol"].apply(lambda s: "✅" if s in held else "")
 
-    # -- Rebalance view ---------------------------------------------------
+    st.caption(f"Score = {w6}% 6M + {w3}% 3M + {w1}% 1M   ·   Hold top {top_n}, exit below rank {exit_rank}   ·   "
+               f"{len(valid)} stocks ranked")
+
+    # ---- What to do: buy / sell candidates --------------------------------
     rank_of = dict(zip(valid["Symbol"], valid["Rank"]))
-    buy_list = valid[(valid["Rank"] <= top_n) & (~valid["Symbol"].isin(held))]["Symbol"].tolist()
-    sell_list = [f"{s} (#{int(rank_of[s])})" if s in rank_of else f"{s} (unranked)"
-                 for s in sorted(held) if s not in rank_of or rank_of[s] > exit_rank]
-    rb1, rb2 = st.columns(2)
-    with rb1:
-        st.markdown(f"**Buy candidates** — in top {int(top_n)}, not held ({len(buy_list)})")
-        st.write(", ".join(buy_list) if buy_list else "None — you hold every top-ranked stock.")
-    with rb2:
-        st.markdown(f"**Sell candidates** — held, ranked below {int(exit_rank)} ({len(sell_list)})")
-        st.write(", ".join(sell_list) if sell_list else "None — all holdings are inside the exit rank.")
+    buys = [f"{r.Symbol} (#{int(r.Rank)})" for r in valid[valid["Rank"] <= top_n].itertuples() if r.Symbol not in held]
+    sells = [f"{s} (#{int(rank_of[s])})" if s in rank_of else f"{s} (unranked)"
+             for s in sorted(held) if s not in rank_of or rank_of[s] > exit_rank]
+    b1, b2 = st.columns(2)
+    b1.markdown(f"<div class='scan-card'><div class='t' style='color:{GREEN}'>Buy — in top {top_n}, not held "
+                f"({len(buys)})</div><div class='b'>{', '.join(buys) if buys else 'Nothing to buy — you hold every top-ranked stock.'}"
+                f"</div></div>", unsafe_allow_html=True)
+    b2.markdown(f"<div class='scan-card'><div class='t' style='color:{RED}'>Sell — held, ranked below {exit_rank} "
+                f"({len(sells)})</div><div class='b'>{', '.join(sells) if sells else 'Nothing to sell — all holdings are inside the exit rank.'}"
+                f"</div></div>", unsafe_allow_html=True)
 
-    # -- Ranking table ----------------------------------------------------
-    show = valid[["Rank", "Symbol", "Status", "Held", "Score", "R6", "R3", "R1", "CMP", "Day %",
-                  "V3", "FromHigh", "MaxDD6M", "AvgDaily6M", "AvgValCr", "Trend", "VCP"]].copy()
-    show["VCP"] = show["VCP"].apply(lambda v: "Yes" if v else "No")
-    show = show.rename(columns={
-        "R6": "6M %", "R3": "3M %", "R1": "1M %", "V3": "Vol 3M (daily %)",
-        "FromHigh": "From 52W High %", "MaxDD6M": "Max DD 6M %",
-        "AvgDaily6M": "Avg Daily Ret 6M %", "AvgValCr": "Avg Traded ₹Cr",
-    })
-    num_cols = ["Score", "6M %", "3M %", "1M %", "CMP", "Day %", "Vol 3M (daily %)",
-                "From 52W High %", "Max DD 6M %", "Avg Daily Ret 6M %", "Avg Traded ₹Cr"]
-    st.dataframe(
-        show, use_container_width=True, hide_index=True, height=520,
-        column_config={c: st.column_config.NumberColumn(c, format="%.2f") for c in num_cols},
-    )
-    export_buttons(show, "momentum_scan", "export_scan")
+    st.write("")
 
-    skipped = raw[raw["Valid"] != True]
-    if len(skipped):
-        with st.expander(f"Excluded from ranking ({len(skipped)}) — missing data or under 6 months of history"):
-            st.dataframe(skipped[["Symbol", "Reason"]], use_container_width=True, hide_index=True)
+    # ---- Ranking table ----------------------------------------------------
+    f1, f2, f3 = st.columns([2, 1, 1], vertical_alignment="center")
+    query = f1.text_input("Search", placeholder="Search a stock…", label_visibility="collapsed", key="scan_search").strip().upper()
+    n_show = f2.selectbox("Rows", [25, 50, 100, "All"], index=1, label_visibility="collapsed", key="scan_rows",
+                          format_func=lambda v: f"Top {v}" if v != "All" else "All stocks")
+    more = f3.toggle("More columns", key="scan_more")
 
-    # -- Compare with Sigma ----------------------------------------------
-    with st.expander("Compare with Sigma Scanner's list"):
+    view = valid[valid["Symbol"].str.contains(query, regex=False)] if query else (
+        valid if n_show == "All" else valid.head(int(n_show)))
+
+    def pct(v, d=1):
+        if v is None or pd.isna(v):
+            return f"<span style='color:{MUTED}'>—</span>"
+        c = GREEN if v > 0 else (RED if v < 0 else MUTED)
+        return f"<span style='color:{c}'>{v:+.{d}f}%</span>"
+
+    heads = [("#", ""), ("Stock", "l"), ("Score", ""), ("6M", ""), ("3M", ""), ("1M", ""), ("Price ₹", ""),
+             ("Day", ""), ("From high", ""), ("Trend", ""), ("VCP", "")]
+    if more:
+        heads += [("Volatility 3M", ""), ("Max drawdown 6M", ""), ("Avg daily ret", ""), ("Traded ₹Cr/day", "")]
+    thead = "".join(f"<th class='{c}'>{h}</th>" for h, c in heads)
+
+    rows_html = []
+    for r in view.itertuples():
+        cls = "top" if r.Rank <= top_n else ("hold" if r.Rank <= exit_rank else "")
+        tag = "<span class='scan-tag held'>HELD</span>" if r.Symbol in held else ""
+        ups = str(r.Trend).count("▲")
+        tcol = GREEN if ups == 2 else (RED if "▼" in str(r.Trend) and ups == 0 else MUTED)
+        vcp = f"<span style='color:{ACCENT};font-weight:700'>Yes</span>" if r.VCP else f"<span style='color:{MUTED}'>No</span>"
+        cells = [
+            f"<td class='n'>{int(r.Rank)}</td>",
+            f"<td class='l'><b>{r.Symbol}</b>{tag}</td>",
+            f"<td class='n'><b>{r.Score:.2f}</b></td>",
+            f"<td class='n'>{pct(r.R6)}</td>", f"<td class='n'>{pct(r.R3)}</td>", f"<td class='n'>{pct(r.R1)}</td>",
+            f"<td class='n'>{r.CMP:,.2f}</td>",
+            f"<td class='n'>{pct(r.DayPct)}</td>",
+            f"<td class='n'>{pct(r.FromHigh)}</td>",
+            f"<td class='n' style='color:{tcol}'>{r.Trend}</td>",
+            f"<td class='n'>{vcp}</td>",
+        ]
+        if more:
+            cells += [
+                f"<td class='n'>{r.V3:.2f}%</td>", f"<td class='n'>{pct(r.MaxDD6M)}</td>",
+                f"<td class='n'>{pct(r.AvgDaily6M, 2)}</td>", f"<td class='n'>{r.AvgValCr:,.1f}</td>",
+            ]
+        rows_html.append(f"<tr class='{cls}'>{''.join(cells)}</tr>")
+
+    if rows_html:
+        st.markdown(f"<div class='scan-wrap'><table class='scan-table'><thead><tr>{thead}</tr></thead>"
+                    f"<tbody>{''.join(rows_html)}</tbody></table></div>", unsafe_allow_html=True)
+        st.caption(f"Green bar = top {top_n} (hold)   ·   Blue bar = hold zone (rank {top_n + 1}–{exit_rank})   ·   "
+                   f"Showing {len(rows_html)} of {len(valid)}")
+    else:
+        st.info("No stocks match.")
+
+    # ---- Tools: export · universe · compare with Sigma --------------------
+    with st.expander("More: export · universe · compare with Sigma"):
+        export_df = valid[["Rank", "Symbol", "Score", "R6", "R3", "R1", "CMP", "FromHigh", "V3", "MaxDD6M",
+                           "AvgDaily6M", "AvgValCr", "Trend", "VCP"]].rename(columns={
+            "R6": "6M %", "R3": "3M %", "R1": "1M %", "FromHigh": "From 52W High %", "V3": "Vol 3M (daily %)",
+            "MaxDD6M": "Max DD 6M %", "AvgDaily6M": "Avg Daily Ret 6M %", "AvgValCr": "Avg Traded ₹Cr"})
+        st.markdown("**Export full ranking**")
+        export_buttons(export_df, "momentum_scan", "export_scan")
+
+        st.markdown("**Universe**")
+        st.caption(f"{len(symbols)} stocks, uploaded {uni['uploaded_on']}. Replace it after NSE's March / September rebalance.")
+        _scanner_universe_uploader("tools")
+
+        st.markdown("**Compare with Sigma Scanner**")
         pasted = st.text_area("Paste Sigma's top symbols (comma, space or new-line separated)", key="scan_sigma_paste")
-        sig = [s.strip().upper().replace(".NS", "") for s in pd.Series(pasted.replace(",", " ").split()).tolist() if s.strip()]
-        sig = list(dict.fromkeys(sig))
+        sig = list(dict.fromkeys(s.strip().upper().replace(".NS", "") for s in pasted.replace(",", " ").split() if s.strip()))
         if sig:
             ours = valid.head(len(sig))["Symbol"].tolist()
             both = [s for s in sig if s in ours]
-            only_sigma = [s for s in sig if s not in ours]
-            only_ours = [s for s in ours if s not in sig]
             st.write(f"**Overlap: {len(both)} of {len(sig)}** (our top {len(sig)} vs Sigma's list)")
-            st.write(f"Only in Sigma: {', '.join(only_sigma) or '—'}")
-            st.write(f"Only in ours: {', '.join(only_ours) or '—'}")
+            st.write(f"Only in Sigma: {', '.join(s for s in sig if s not in ours) or '—'}")
+            st.write(f"Only in ours: {', '.join(s for s in ours if s not in sig) or '—'}")
+
+        skipped = raw[raw["Valid"] != True]
+        if len(skipped):
+            st.markdown(f"**Excluded from ranking ({len(skipped)})** — missing data or under 6 months of history")
+            st.dataframe(skipped[["Symbol", "Reason"]], use_container_width=True, hide_index=True)
 
 
 # ---------------------------------------------------------------------------
