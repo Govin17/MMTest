@@ -16,6 +16,7 @@ Edit the HOLDINGS list below whenever you buy/sell or rebalance.
 import os
 import io
 import json
+import pickle
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -421,7 +422,7 @@ def detect_vcp(hist):
         return False
 
 
-def _batch_download(tickers, period):
+def _batch_download(tickers, period, threads=True):
     """Fetch OHLCV for multiple tickers in a single yfinance call instead of
     looping yf.Ticker(...).history() one ticker at a time — this is the main
     thing that made the dashboard slow. Returns {ticker: DataFrame}, with an
@@ -431,7 +432,7 @@ def _batch_download(tickers, period):
     if not tickers:
         return out
     try:
-        raw = yf.download(tickers, period=period, group_by="ticker", threads=True, progress=False, auto_adjust=False)
+        raw = yf.download(tickers, period=period, group_by="ticker", threads=threads, progress=False, auto_adjust=False)
         if raw is None or raw.empty:
             return out
         if len(tickers) == 1:
@@ -743,16 +744,87 @@ def _ret_over_months(close, months):
     return ret, (float(vol) if pd.notna(vol) else None)
 
 
-@st.cache_data(ttl=6 * 3600, show_spinner=False)
-def fetch_scan_metrics(symbols):
-    """Raw per-stock momentum metrics for a universe (tuple of NSE symbols, no .NS suffix).
-    Downloads in batches of 100. The weighted score / ranking is done in the UI so the
-    weights can be changed without refetching."""
-    tickers = [s + ".NS" for s in symbols]
-    data = {}
-    for i in range(0, len(tickers), 100):
-        data.update(_batch_download(tickers[i:i + 100], period="1y"))
+SCAN_PRICES_FILE = "scan_prices.pkl"
+SCAN_KEEP_ROWS = 300          # ~14 months of daily bars per stock
+SCAN_FULL_THREADS = 16
 
+
+def load_scan_prices():
+    """On-disk price store: {"saved": datetime|None, "data": {ticker: OHLCV DataFrame}}."""
+    try:
+        with open(SCAN_PRICES_FILE, "rb") as f:
+            store = pickle.load(f)
+            if isinstance(store, dict) and "data" in store:
+                return store
+    except Exception:
+        pass
+    return {"saved": None, "data": {}}
+
+
+def update_scan_prices(symbols, progress=None):
+    """Bring the on-disk price store up to date for these symbols.
+    - Stocks we already have (and that aren't stale) only fetch the last month of bars
+      and get merged in — a few seconds instead of re-downloading a year for every stock.
+    - New / stale stocks get a full 1y download, in batches with a progress callback.
+    Stocks that fail are retried once."""
+    store = load_scan_prices()
+    data = store["data"]
+    tickers = [s + ".NS" for s in symbols]
+    today = pd.Timestamp.now(tz="Asia/Kolkata").normalize()
+
+    incremental, full = [], []
+    for t in tickers:
+        d = data.get(t)
+        if d is None or d.empty or len(d) < 120:
+            full.append(t)
+            continue
+        last = d.index[-1]
+        last = last.tz_convert("Asia/Kolkata") if last.tzinfo else last.tz_localize("Asia/Kolkata")
+        (incremental if (today - last.normalize()).days <= 25 else full).append(t)
+
+    jobs = [(incremental[i:i + 200], "1mo") for i in range(0, len(incremental), 200)]
+    jobs += [(full[i:i + 100], "1y") for i in range(0, len(full), 100)]
+    total = max(len(jobs), 1)
+
+    def _merge(t, fresh):
+        if fresh is None or fresh.empty:
+            return False
+        old = data.get(t)
+        if old is not None and not old.empty:
+            fresh = pd.concat([old, fresh])
+            fresh = fresh[~fresh.index.duplicated(keep="last")].sort_index()
+        data[t] = fresh.tail(SCAN_KEEP_ROWS)
+        return True
+
+    failed = []
+    for n, (chunk, period) in enumerate(jobs):
+        got = _batch_download(chunk, period=period, threads=SCAN_FULL_THREADS)
+        for t in chunk:
+            if not _merge(t, got.get(t)):
+                failed.append((t, period))
+        if progress:
+            progress((n + 1) / total, f"Fetched batch {n + 1} of {total}")
+
+    # one retry for anything that came back empty
+    for period in ("1mo", "1y"):
+        retry = [t for t, p in failed if p == period]
+        if retry:
+            got = _batch_download(retry, period=period, threads=SCAN_FULL_THREADS)
+            for t in retry:
+                _merge(t, got.get(t))
+
+    store = {"saved": datetime.now(), "data": data}
+    try:
+        with open(SCAN_PRICES_FILE, "wb") as f:
+            pickle.dump(store, f)
+    except Exception:
+        pass
+    return store
+
+
+def compute_scan_metrics(symbols, data):
+    """Raw per-stock momentum metrics from a price store (no network, ~1-2s for 400 stocks).
+    The weighted score / ranking is done in the UI so weights can change instantly."""
     rows = []
     for sym in symbols:
         hist = data.get(sym + ".NS")
@@ -1002,7 +1074,6 @@ with c2:
         fetch_technicals.clear()
         fetch_paper_value_series.clear()
         fetch_market_regime.clear()
-        fetch_scan_metrics.clear()
         st.rerun()
 
 holdings_store = load_holdings_store()
@@ -2219,7 +2290,8 @@ def _render_one_portfolio(active_portfolio, portfolios, portfolio_names):
 # =============================================================================
 def render_scanner_tab():
     st.caption("Ranks your uploaded universe (e.g. Nifty MidSmallCap 400) by weighted 6M/3M/1M returns — "
-               "the same formula family you backtested. Prices from Yahoo Finance, cached for 6 hours.")
+               "the same formula family you backtested. Prices from Yahoo Finance, saved on disk and "
+               "topped up incrementally.")
 
     # -- Universe ---------------------------------------------------------
     uni = load_scanner_universe()
@@ -2278,17 +2350,29 @@ def render_scanner_tab():
     ], key="scan_mode")
     min_val = d2.number_input("Min avg traded value (₹ Cr/day)", 0.0, 500.0, 0.0, step=0.5, key="scan_minval")
 
-    run = st.button("🔍 Run scan", key="scan_run", type="primary")
-    if run:
-        with st.spinner(f"Fetching {len(symbols)} stocks from Yahoo Finance… (first run can take a minute)"):
-            st.session_state["scan_raw"] = fetch_scan_metrics(tuple(symbols))
-            st.session_state["scan_time"] = datetime.now().strftime("%d %b %Y, %H:%M")
+    # Open instantly from the saved price store (no network); the button only tops it up.
     if "scan_raw" not in st.session_state:
-        st.caption("Click **Run scan** to fetch prices and rank the universe.")
+        store = load_scan_prices()
+        if store["data"] and any((s + ".NS") in store["data"] for s in symbols):
+            st.session_state["scan_raw"] = compute_scan_metrics(symbols, store["data"])
+            st.session_state["scan_time"] = store["saved"].strftime("%d %b %Y, %H:%M") if store["saved"] else "—"
+
+    has_data = "scan_raw" in st.session_state
+    run = st.button("⚡ Update prices" if has_data else "🔍 Run scan (first time: downloads 1 year of prices)",
+                    key="scan_run", type="primary")
+    if run:
+        bar = st.progress(0.0, text="Starting…")
+        store = update_scan_prices(symbols, progress=lambda p, msg: bar.progress(min(p, 1.0), text=msg))
+        st.session_state["scan_raw"] = compute_scan_metrics(symbols, store["data"])
+        st.session_state["scan_time"] = datetime.now().strftime("%d %b %Y, %H:%M")
+        bar.empty()
+    if "scan_raw" not in st.session_state:
+        st.caption("Click **Run scan** once to download prices. After that, updates only fetch the latest days.")
         return
 
     raw = st.session_state["scan_raw"].copy()
-    st.caption(f"Scan data as of {st.session_state.get('scan_time', '—')}.")
+    st.caption(f"Prices last updated: {st.session_state.get('scan_time', '—')}. "
+               f"Changing weights, top N or exit rank re-ranks instantly.")
 
     # -- Score & rank -----------------------------------------------------
     valid = raw[raw["Valid"] == True].copy()
